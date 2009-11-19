@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <vector>
 
 // includes, project
 #include <cutil_inline.h>
@@ -124,9 +125,6 @@ float weightArray[] =
 // declaration, forward
 void runTest( int argc, char** argv);
 
-extern "C"
-void computeGold( float* reference, float* idata, const unsigned int len);
-
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
 ////////////////////////////////////////////////////////////////////////////////
@@ -150,61 +148,62 @@ runTest( int argc, char** argv)
 	else
 		cudaSetDevice( cutGetMaxGflopsDeviceId() );
 
-    unsigned int timer = 0;
-    cutilCheckError( cutCreateTimer( &timer));
-    cutilCheckError( cutStartTimer( timer));
-
     // Allocate memory for arrays
     GraphData graph;
     graph.vertexCount = sizeof(vertexArray) / sizeof(int);
     graph.edgeCount = sizeof(edgeArray) / sizeof(int);
+    graph.vertexArray = &vertexArray[0];
+    graph.edgeArray = &edgeArray[0];
+    graph.weightArray = &weightArray[0];
+
+
     printf("Vertex Count: %d\n", graph.vertexCount);
     printf("Edge Count: %d\n", graph.edgeCount);
 
-    // V
-    cutilSafeCall( cudaMalloc( (void**) &graph.vertexArray, sizeof(int) * graph.vertexCount) );
-    cutilSafeCall( cudaMemcpy( graph.vertexArray, vertexArray, sizeof(int) * graph.vertexCount, cudaMemcpyHostToDevice) );
+    std::vector<int> sourceVertices;
+    std::vector<int> endVertices;
 
-    // E
-    cutilSafeCall( cudaMalloc( (void**) &graph.edgeArray, sizeof(int) * graph.edgeCount) );
-    cutilSafeCall( cudaMemcpy( graph.edgeArray, edgeArray, sizeof(int) * graph.edgeCount, cudaMemcpyHostToDevice) );
-
-    // W
-    cutilSafeCall( cudaMalloc( (void**) &graph.weightArray, sizeof(float) * graph.edgeCount) );
-    cutilSafeCall( cudaMemcpy( graph.weightArray, weightArray, sizeof(float) * graph.edgeCount, cudaMemcpyHostToDevice) );
-
-    // M, C, U
-    cutilSafeCall( cudaMalloc( (void**) &graph.maskArray, sizeof(unsigned char) * graph.vertexCount) );
-    cutilSafeCall( cudaMalloc( (void**) &graph.costArray, sizeof(float) * graph.vertexCount) );
-    cutilSafeCall( cudaMalloc( (void**) &graph.updatingCostArray, sizeof(float) * graph.vertexCount) );
-
-
-    float *resultCosts = (float*) malloc(sizeof(float) * graph.vertexCount);
-
-    for(int source = 0; source < graph.vertexCount; source++)
+    for (int k = 0; k < 1000; k++)
     {
-        runDijkstra(&graph, source);
-
-        cutilSafeCall( cudaMemcpy( resultCosts, graph.costArray, sizeof(float) * graph.vertexCount, cudaMemcpyDeviceToHost) );
-
-        printf("--\n");
-        printf("From %s:\n", vNames[source]);
-        for (int i = 0; i < graph.vertexCount; i++ )
+        for(int source = 0; source < graph.vertexCount; source++)
         {
-            if (i != source)
+            for (int i = 0; i < graph.vertexCount; i++ )
             {
-                printf(" --> %s: %f\n", vNames[i], resultCosts[i]);
+                if (i != source)
+                {
+                    sourceVertices.push_back(source);
+                    endVertices.push_back(i);
+                }
             }
         }
-
     }
 
-    cutilSafeCall(cudaFree(graph.vertexArray));
-    cutilSafeCall(cudaFree(graph.edgeArray));
-    cutilSafeCall(cudaFree(graph.weightArray));
-    cutilSafeCall(cudaFree(graph.maskArray));
-    cutilSafeCall(cudaFree(graph.costArray));
-    cutilSafeCall(cudaFree(graph.updatingCostArray));
+    int *sourceVertArray = (int*) malloc(sizeof(int) * sourceVertices.size());
+    std::copy(sourceVertices.begin(), sourceVertices.end(), sourceVertArray);
+
+    int *endVertArray = (int*) malloc(sizeof(int) * endVertices.size());
+    std::copy(endVertices.begin(), endVertices.end(), endVertArray);
+
+    float *results = (float*) malloc(sizeof(float) * endVertices.size());
+
+    unsigned int timer = 0;
+    cutilCheckError(cutCreateTimer(&timer));
+    cutilCheckError(cutStartTimer(timer));
+
+    runDijkstraMultiGPU(&graph, sourceVertArray, endVertArray, results, sourceVertices.size() );
+
+    cutilCheckError(cutStopTimer(timer));
+
+    for (int i = 0; i < sourceVertices.size(); i++)
+    {
+        printf("%s --> %s: %f\n", vNames[sourceVertArray[i]], vNames[endVertArray[i]], results[i] );
+    }
+
+    printf("Total GPU Processing time: %f (ms) \n", cutGetTimerValue(timer));
+
+    free(sourceVertArray);
+    free(endVertArray);
+    free(results);
 
     cudaThreadExit();
 }
