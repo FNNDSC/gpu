@@ -1,4 +1,4 @@
-DIRS = C
+DIRS = C OpenCL
 
 all:
 	set -e; for d in $(DIRS); do $(MAKE) -C $$d ; done

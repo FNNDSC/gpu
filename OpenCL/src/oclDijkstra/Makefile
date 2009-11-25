@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright 1993-2006 NVIDIA Corporation.  All rights reserved.
+# Copyright 1993-2009 NVIDIA Corporation.  All rights reserved.
 #
 # NOTICE TO USER:   
 #
@@ -34,22 +34,16 @@
 ################################################################################
 
 # Add source files here
-EXECUTABLE	:= dijkstra
-# CUDA source files (compiled with cudacc)
-CUFILES		:= 
-# CUDA dependency files
-CU_DEPS		:= 
+EXECUTABLE	:= oclDijkstra
 
 # C/C++ source files (compiled with gcc / c++)
-CCFILES		:= dijkstra.cpp
+CCFILES		:= oclDijkstra.cpp \
+				oclDijkstraKernel.cpp
 
-# Add Include path to Dijkstra library
-INCLUDES 	+= -I../dijkstraLib
 
 ################################################################################
 # Rules and targets
 
-include ../../common/common.mk
+include ../../common/common_opencl.mk
 
-# Link against Dijkstra library
-LIB		+= -ldijkstra_$(LIB_ARCH)$(LIBSUFFIX)
+

@@ -24,6 +24,7 @@
 #include <string.h>
 #include <math.h>
 #include <vector>
+#include <multithreading.h>
 
 // includes, project
 #include <cutil_inline.h>
@@ -144,6 +145,9 @@ main( int argc, char** argv)
 void
 runTest( int argc, char** argv) 
 {
+//@TEMP - why do I need this for link to work on Linux?
+cutWaitForThreads(NULL,0);
+//@TEMP
 	// use command-line specified CUDA device, otherwise use device with highest Gflops/s
 	if( cutCheckCmdLineFlag(argc, (const char**)argv, "device") )
 		cutilDeviceInit(argc, argv);

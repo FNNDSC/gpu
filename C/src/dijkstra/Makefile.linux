@@ -52,4 +52,5 @@ INCLUDES 	+= -I../dijkstraLib
 include ../../common/common.mk
 
 # Link against Dijkstra library
-LIB		+= -ldijkstra_$(LIB_ARCH)$(LIBSUFFIX)
+LIB		+= -ldijkstra
+

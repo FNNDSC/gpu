@@ -1,4 +1,4 @@
-################################################################################
+###############################################################################
 #
 # Copyright 1993-2006 NVIDIA Corporation.  All rights reserved.
 #
@@ -27,29 +27,23 @@
 # 227.7202-4 (JUNE 1995), all U.S. Government End Users acquire the 
 # source code with only those rights set forth herein.
 #
-################################################################################
+###############################################################################
 #
-# Build script for project
+# CUda UTility library build script
 #
-################################################################################
+###############################################################################
 
-# Add source files here
-EXECUTABLE	:= dijkstra
-# CUDA source files (compiled with cudacc)
-CUFILES		:= 
-# CUDA dependency files
-CU_DEPS		:= 
+###############################################################################
+# SOURCE VARS
+CCFILES := 	src/shrUtils.cpp \
+            src/rendercheckGL.cpp \
+            src/cmd_arg_reader.cpp
 
-# C/C++ source files (compiled with gcc / c++)
-CCFILES		:= dijkstra.cpp
+SRCDIR := src/
 
-# Add Include path to Dijkstra library
-INCLUDES 	+= -I../dijkstraLib
+ROOTDIR := .
 
-################################################################################
-# Rules and targets
+STATIC_LIB := libshrutil.a
 
-include ../../common/common.mk
+include common.mk
 
-# Link against Dijkstra library
-LIB		+= -ldijkstra_$(LIB_ARCH)$(LIBSUFFIX)
