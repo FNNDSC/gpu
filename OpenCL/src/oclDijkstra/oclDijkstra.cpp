@@ -157,7 +157,7 @@ int main(int argc, const char **argv)
     std::vector<int> sourceVertices;
     std::vector<int> endVertices;
 
-    for (int k = 0; k < 1000; k++)
+    for (int k = 0; k < 1; k++)
     {
        for(int source = 0; source < graph.vertexCount; source++)
        {
@@ -194,6 +194,8 @@ int main(int argc, const char **argv)
     free(sourceVertArray);
     free(endVertArray);
     free(results);
+
+    clReleaseContext(gpuContext);
 
 #if 0
     // OpenCL

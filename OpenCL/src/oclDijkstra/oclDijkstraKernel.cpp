@@ -149,13 +149,18 @@ void allocateOCLBuffers(cl_context gpuContext, cl_command_queue commandQueue, Gr
     errNum = clEnqueueCopyBuffer(commandQueue, hostVertexArrayBuffer, *vertexArrayDevice, 0, 0,
                                  sizeof(int) * graph->vertexCount, 0, NULL, NULL);
     shrCheckError(errNum, CL_SUCCESS);
+
     errNum = clEnqueueCopyBuffer(commandQueue, hostEdgeArrayBuffer, *edgeArrayDevice, 0, 0,
                                  sizeof(int) * graph->edgeCount, 0, NULL, NULL);
     shrCheckError(errNum, CL_SUCCESS);
+
     errNum = clEnqueueCopyBuffer(commandQueue, hostWeightArrayBuffer, *weightArrayDevice, 0, 0,
                                  sizeof(float) * graph->edgeCount, 0, NULL, NULL);
     shrCheckError(errNum, CL_SUCCESS);
 
+    clReleaseMemObject(hostVertexArrayBuffer);
+    clReleaseMemObject(hostEdgeArrayBuffer);
+    clReleaseMemObject(hostWeightArrayBuffer);
 }
 
 ///
@@ -167,20 +172,12 @@ void initializeOCLBuffers(cl_command_queue commandQueue, cl_kernel initializeKer
     // Set # of work items in work group and total in 1 dimensional range
     size_t localWorkSize[1] = { 1 };
     size_t globalWorkSize[1];
-    cl_event eventDone;
 
     globalWorkSize[0] = graph->vertexCount;
 
     errNum = clEnqueueNDRangeKernel(commandQueue, initializeKernel, 1, 0, globalWorkSize, localWorkSize,
-                                    0, NULL, &eventDone);
+                                    0, NULL, NULL);
     shrCheckError(errNum, CL_SUCCESS);
-
-    //@TEMP - probably don't need to sync here - remove this once I have everythiung
-    //        working
-    // Synchronize with the GPUs and do accumulated error check
-    clWaitForEvents(1, &eventDone);
-    //@TEMP
-
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -281,11 +278,8 @@ void runDijkstra( cl_context gpuContext, GraphData* graph, int *sourceVertices, 
 
 
     unsigned char *maskArrayHost = (unsigned char*) malloc(sizeof(unsigned char) * graph->vertexCount);
-    cl_mem maskArrayHostBuffer;
-    maskArrayHostBuffer = clCreateBuffer(gpuContext, CL_MEM_COPY_HOST_PTR | CL_MEM_ALLOC_HOST_PTR,
-                                         sizeof(unsigned char) * graph->vertexCount, maskArrayHost, &errNum);
-    shrCheckError(errNum, CL_SUCCESS);
 
+    shrLog(LOGBOTH, 0.0, "Num results: %d\n", numResults);
 
     for ( int i = 0 ; i < numResults; i++ )
     {
@@ -300,7 +294,7 @@ void runDijkstra( cl_context gpuContext, GraphData* graph, int *sourceVertices, 
         // Read mask array from device -> host
         cl_event readDone;
         errNum = clEnqueueReadBuffer( commandQueue, maskArrayDevice, CL_FALSE, 0, sizeof(unsigned char) * graph->vertexCount,
-                                      maskArrayHostBuffer, 0, NULL, &readDone);
+                                      maskArrayHost, 0, NULL, &readDone);
         shrCheckError(errNum, CL_SUCCESS);
         clWaitForEvents(1, &readDone);
 
@@ -322,33 +316,38 @@ void runDijkstra( cl_context gpuContext, GraphData* graph, int *sourceVertices, 
                                             0, NULL, NULL);
             shrCheckError(errNum, CL_SUCCESS);
 
-            errNum = clEnqueueReadBuffer( commandQueue, maskArrayDevice, CL_FALSE, 0, sizeof(unsigned char) * graph->vertexCount,
-                                          maskArrayHostBuffer, 0, NULL, &readDone);
+            errNum = clEnqueueReadBuffer(commandQueue, maskArrayDevice, CL_FALSE, 0, sizeof(unsigned char) * graph->vertexCount,
+                                          maskArrayHost, 0, NULL, &readDone);
             shrCheckError(errNum, CL_SUCCESS);
             clWaitForEvents(1, &readDone);
         }
 
-        shrLog(LOGBOTH, 0.0, "Iteration: %d\n", i);
-
-//        float result;
+        float result;
 
         // Copy the result back
-//        cutilSafeCall( cudaMemcpy( &result, &costArrayDevice[endVertices[i]], sizeof(float), cudaMemcpyDeviceToHost) );
-//        outResultCosts[i] = result;
+        errNum = clEnqueueReadBuffer(commandQueue, costArrayDevice, CL_FALSE, endVertices[i] * sizeof(float), sizeof(float),
+                                     &result, 0, NULL, &readDone);
+        shrCheckError(errNum, CL_SUCCESS);
+        clWaitForEvents(1, &readDone);
+        outResultCosts[i] = result;
     }
 
 
     free (maskArrayHost);
-/*
-    // Free all the buffers
-    cutilSafeCall(cudaFree(vertexArrayDevice));
-    cutilSafeCall(cudaFree(edgeArrayDevice));
-    cutilSafeCall(cudaFree(weightArrayDevice));
-    cutilSafeCall(cudaFree(maskArrayDevice));
-    cutilSafeCall(cudaFree(costArrayDevice));
-    cutilSafeCall(cudaFree(updatingCostArrayDevice));
-    cutilSafeCall(cudaFree(infinityArrayDevice));
-    */
+
+    clReleaseMemObject(vertexArrayDevice);
+    clReleaseMemObject(edgeArrayDevice);
+    clReleaseMemObject(weightArrayDevice);
+    clReleaseMemObject(maskArrayDevice);
+    clReleaseMemObject(costArrayDevice);
+    clReleaseMemObject(updatingCostArrayDevice);
+
+    clReleaseKernel(initializeBuffersKernel);
+    clReleaseKernel(ssspKernel1);
+    clReleaseKernel(ssspKernel2);
+
+    clReleaseCommandQueue(commandQueue);
+    clReleaseProgram(program);
 }
 
 

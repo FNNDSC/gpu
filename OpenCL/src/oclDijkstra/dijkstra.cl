@@ -15,25 +15,6 @@
 //  GPL v2
 //
 
-////////////////////////////////////////////////////////////////////////////////
-// Simple reduction kernel.
-// Refer to the 'reduction' CUDA SDK sample describing
-// reduction optimization strategies
-////////////////////////////////////////////////////////////////////////////////
-__kernel void reduce(__global float *d_Result, __global float *d_Input, int N){
-    const int tid = get_global_id(0);
-    const int threadN = get_global_size(0);
-
-    float sum = 0;
-
-    for(int pos = tid; pos < N; pos += threadN)
-        sum += d_Input[pos];
-
-    d_Result[tid] = sum;
-}
-
-
-
 ///
 /// This is part 1 of the Kernel from Algorithm 4 in the paper
 ///
@@ -42,7 +23,7 @@ __kernel  void OCL_SSSP_KERNEL1(__global int *vertexArray, __global int *edgeArr
                                int vertexCount, int edgeCount )
 {
     // access thread id
-    unsigned int tid = get_global_id(0);
+    int tid = get_global_id(0);
 
     if ( maskArray[tid] != 0 )
     {
@@ -81,10 +62,10 @@ __kernel  void OCL_SSSP_KERNEL1(__global int *vertexArray, __global int *edgeArr
 ///
 __kernel  void OCL_SSSP_KERNEL2(__global int *vertexArray, __global int *edgeArray, __global float *weightArray,
                                 __global unsigned char *maskArray, __global float *costArray, __global float *updatingCostArray,
-                                __global int endVertex )
+                                int endVertex )
 {
     // access thread id
-    unsigned int tid = get_global_id(0);
+    int tid = get_global_id(0);
 
     if (costArray[tid] > updatingCostArray[tid])
     {
