@@ -129,18 +129,20 @@ int main(int argc, const char **argv)
     shrSetLogFileName ("oclDijkstra.txt");
 
     cl_context gpuContext;
+    cl_context cpuContext;
     cl_int errNum;
 
     // start timer & logs
     shrLog(LOGBOTH, 0.0, "Setting up OpenCL on the Host...\n\n");
     shrDeltaT(1);
 
-
     // create the OpenCL context on available GPU devices
     gpuContext = clCreateContextFromType(0, CL_DEVICE_TYPE_GPU, NULL, NULL, &errNum);
     shrLog(LOGBOTH, 0.0, "clCreateContextFromType\n\n");
 
-
+    // Create an OpenCL context on available CPU devices
+    cpuContext = clCreateContextFromType(0, CL_DEVICE_TYPE_CPU, NULL, NULL, &errNum);
+    shrLog(LOGBOTH, 0.0, "clCreateContextFromType");
 
     // Allocate memory for arrays
     GraphData graph;
@@ -157,7 +159,7 @@ int main(int argc, const char **argv)
     std::vector<int> sourceVertices;
     std::vector<int> endVertices;
 
-    for (int k = 0; k < 100; k++)
+    for (int k = 0; k < 250; k++)
     {
        for(int source = 0; source < graph.vertexCount; source++)
        {
@@ -182,13 +184,49 @@ int main(int argc, const char **argv)
 
 
     // Run Dijkstra's algorithm
-    runDijkstraMultiGPU(gpuContext, &graph, sourceVertArray, endVertArray, results, sourceVertices.size() );
+    shrDeltaT(0);
+    double startTimeCPU = shrDeltaT(0);
+
+    runDijkstra(cpuContext, oclGetMaxFlopsDev(cpuContext), &graph, sourceVertArray,
+                endVertArray, results, sourceVertices.size() );
+
+    double endTimeCPU = shrDeltaT(0);
+
+    double startTimeGPU = shrDeltaT(0);
+
+    runDijkstra(gpuContext, oclGetMaxFlopsDev(gpuContext), &graph, sourceVertArray,
+                endVertArray, results, sourceVertices.size() );
+
+    double endTimeGPU = shrDeltaT(0);
+
+
+    double startTimeMultiGPU = shrDeltaT(0);
+
+    runDijkstraMultiGPU(gpuContext, &graph, sourceVertArray,
+                        endVertArray, results, sourceVertices.size() );
+
+    double endTimeMultiGPU = shrDeltaT(0);
+
+    double startTimeGPUCPU = shrDeltaT(0);
+    runDijkstraMultiGPUandCPU(gpuContext, cpuContext, &graph, sourceVertArray,
+                              endVertArray, results, sourceVertices.size() );
+    double endTimeGPUCPU = shrDeltaT(0);
+
+
 
 
     for (unsigned int i = 0; i < sourceVertices.size(); i++)
     {
        printf("%s --> %s: %f\n", vNames[sourceVertArray[i]], vNames[endVertArray[i]], results[i] );
     }
+
+
+
+    shrLog(LOGBOTH, 0.0, "\nrunDijkstra - CPU Time:               %f s\n", endTimeCPU - startTimeCPU);
+    shrLog(LOGBOTH, 0.0, "\nrunDijkstra - Single GPU Time:        %f s\n", endTimeGPU - startTimeGPU);
+    shrLog(LOGBOTH, 0.0, "\nrunDijkstra - Multi GPU Time:         %f s\n", endTimeMultiGPU - startTimeMultiGPU);
+    shrLog(LOGBOTH, 0.0, "\nrunDijkstra - Multi GPU and CPU Time: %f s\n", endTimeGPUCPU - startTimeGPUCPU);
+
 
 
     free(sourceVertArray);

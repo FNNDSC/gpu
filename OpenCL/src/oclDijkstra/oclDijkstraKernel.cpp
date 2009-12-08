@@ -28,10 +28,10 @@
 // the work on a per-GPU basis.
 typedef struct
 {
-    // GPU context
+    // Context
     cl_context context;
 
-    // GPU number to run algorithm on
+    // Device number to run algorithm on
     cl_device_id deviceId;
 
     // Pointer to graph data
@@ -49,7 +49,7 @@ typedef struct
     // Number of results
     int numResults;
 
-} GPUPlan;
+} DevicePlan;
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -188,9 +188,9 @@ void initializeOCLBuffers(cl_command_queue commandQueue, cl_kernel initializeKer
 }
 
 ///
-/// Worker thread for running the algorithm on one of the GPUs
+/// Worker thread for running the algorithm on one of the compute devices
 ///
-void dijkstraThread(GPUPlan *plan)
+void dijkstraThread(DevicePlan *plan)
 {
     runDijkstra( plan->context, plan->deviceId, plan->graph, plan->sourceVertices,
                  plan->endVertices, plan->outResultCosts, plan->numResults );
@@ -408,38 +408,38 @@ void runDijkstraMultiGPU( cl_context gpuContext, GraphData* graph, int *sourceVe
         return;
     }
 
-    GPUPlan *gpuPlans = (GPUPlan*) malloc(sizeof(GPUPlan) * deviceCount);
+    DevicePlan *devicePlans = (DevicePlan*) malloc(sizeof(DevicePlan) * deviceCount);
     pthread_t *threadIDs = (pthread_t*) malloc(sizeof(pthread_t) * deviceCount);
 
-    // Divide the workload out per GPU
-    int resultsPerGPU = numResults / deviceCount;
+    // Divide the workload out per device
+    int resultsPerDevice = numResults / deviceCount;
 
     int offset = 0;
 
     for (unsigned int i = 0; i < deviceCount; i++)
     {
-        gpuPlans[i].context = gpuContext;
-        gpuPlans[i].deviceId = oclGetDev(gpuContext, i);;
-        gpuPlans[i].graph = graph;
-        gpuPlans[i].sourceVertices = &sourceVertices[offset];
-        gpuPlans[i].endVertices = &endVertices[offset];
-        gpuPlans[i].outResultCosts = &outResultCosts[offset];
-        gpuPlans[i].numResults = resultsPerGPU;
+        devicePlans[i].context = gpuContext;
+        devicePlans[i].deviceId = oclGetDev(gpuContext, i);;
+        devicePlans[i].graph = graph;
+        devicePlans[i].sourceVertices = &sourceVertices[offset];
+        devicePlans[i].endVertices = &endVertices[offset];
+        devicePlans[i].outResultCosts = &outResultCosts[offset];
+        devicePlans[i].numResults = resultsPerDevice;
 
-        oclPrintDevInfo(LOGBOTH, gpuPlans[i].deviceId);
-        offset += resultsPerGPU;
+        oclPrintDevInfo(LOGBOTH, devicePlans[i].deviceId);
+        offset += resultsPerDevice;
     }
 
     // Add any remaining work to the last GPU
     if (offset < numResults)
     {
-        gpuPlans[deviceCount - 1].numResults += (numResults - offset);
+        devicePlans[deviceCount - 1].numResults += (numResults - offset);
     }
 
     // Launch all the threads
     for (unsigned int i = 0; i < deviceCount; i++)
     {
-        pthread_create(&threadIDs[i], NULL, (void* (*)(void*))dijkstraThread, (void*)(gpuPlans + i));
+        pthread_create(&threadIDs[i], NULL, (void* (*)(void*))dijkstraThread, (void*)(devicePlans + i));
     }
 
     // Wait for the results from all threads
@@ -448,7 +448,125 @@ void runDijkstraMultiGPU( cl_context gpuContext, GraphData* graph, int *sourceVe
         pthread_join(threadIDs[i], NULL);
     }
 
-    free (gpuPlans);
+    free (devicePlans);
     free (threadIDs);
 }
+
+///
+/// Run Dijkstra's shortest path on the GraphData provided to this function.  This
+/// function will compute the shortest path distance from sourceVertices[n] ->
+/// endVertices[n] and store the cost in outResultCosts[n].  The number of results
+/// it will compute is given by numResults.
+///
+/// This function will run the algorithm on as many GPUs as is available along with
+/// the CPU.  It will create N threads, one for each device, and chunk the workload up to perform
+/// (numResults / N) searches per device.
+///
+/// \param gpuContext Current GPU context, must be created by caller
+/// \param cpuContext Current CPU context, must be created by caller
+/// \param graph Structure containing the vertex, edge, and weight arra
+///              for the input graph
+/// \param startVertices Indices into the vertex array from which to
+///                      start the search
+/// \param endVertices Indices into the vertex array from which to end
+///                    the search.
+/// \param outResultsCosts A pre-allocated array where the results for
+///                        each shortest path search will be written
+/// \param numResults Should be the size of all three passed inarrays
+///
+///
+void runDijkstraMultiGPUandCPU( cl_context gpuContext, cl_context cpuContext, GraphData* graph,
+                                int *sourceVertices, int *endVertices,
+                                float *outResultCosts, int numResults )
+{
+
+    // Find out how many GPU's to compute on all available GPUs
+    cl_int errNum;
+    size_t deviceBytes;
+    cl_uint gpuDeviceCount;
+    cl_uint cpuDeviceCount;
+
+    errNum = clGetContextInfo(gpuContext, CL_CONTEXT_DEVICES, 0, NULL, &deviceBytes);
+    shrCheckError(errNum, CL_SUCCESS);
+    gpuDeviceCount = (cl_uint)deviceBytes/sizeof(cl_device_id);
+
+    if (gpuDeviceCount == 0)
+    {
+        shrLog(LOGBOTH, 0.0, "ERROR: no GPUs present!");
+        return;
+    }
+
+    errNum = clGetContextInfo(cpuContext, CL_CONTEXT_DEVICES, 0, NULL, &deviceBytes);
+    shrCheckError(errNum, CL_SUCCESS);
+    cpuDeviceCount = (cl_uint)deviceBytes/sizeof(cl_device_id);
+
+    if (cpuDeviceCount == 0)
+    {
+        shrLog(LOGBOTH, 0.0, "ERROR: no CPUs present!");
+        return;
+    }
+
+    cl_uint totalDeviceCount = gpuDeviceCount + cpuDeviceCount;
+
+    DevicePlan *devicePlans = (DevicePlan*) malloc(sizeof(DevicePlan) * totalDeviceCount);
+    pthread_t *threadIDs = (pthread_t*) malloc(sizeof(pthread_t) * totalDeviceCount);
+
+    // Divide the workload out per device
+    int resultsPerDevice = numResults / totalDeviceCount;
+
+    int offset = 0;
+
+    int curDevice = 0;
+    for (unsigned int i = 0; i < gpuDeviceCount; i++)
+    {
+        devicePlans[curDevice].context = gpuContext;
+        devicePlans[curDevice].deviceId = oclGetDev(gpuContext, i);;
+        devicePlans[curDevice].graph = graph;
+        devicePlans[curDevice].sourceVertices = &sourceVertices[offset];
+        devicePlans[curDevice].endVertices = &endVertices[offset];
+        devicePlans[curDevice].outResultCosts = &outResultCosts[offset];
+        devicePlans[curDevice].numResults = resultsPerDevice;
+
+        oclPrintDevInfo(LOGBOTH, devicePlans[curDevice].deviceId);
+        offset += resultsPerDevice;
+        curDevice++;
+    }
+
+    for (unsigned int i = 0; i < cpuDeviceCount; i++)
+    {
+        devicePlans[curDevice].context = cpuContext;
+        devicePlans[curDevice].deviceId = oclGetDev(cpuContext, i);;
+        devicePlans[curDevice].graph = graph;
+        devicePlans[curDevice].sourceVertices = &sourceVertices[offset];
+        devicePlans[curDevice].endVertices = &endVertices[offset];
+        devicePlans[curDevice].outResultCosts = &outResultCosts[offset];
+        devicePlans[curDevice].numResults = resultsPerDevice;
+
+        oclPrintDevInfo(LOGBOTH, devicePlans[curDevice].deviceId);
+        offset += resultsPerDevice;
+        curDevice++;
+    }
+
+    // Add any remaining work to the last GPU
+    if (offset < numResults)
+    {
+        devicePlans[totalDeviceCount - 1].numResults += (numResults - offset);
+    }
+
+    // Launch all the threads
+    for (unsigned int i = 0; i < totalDeviceCount; i++)
+    {
+        pthread_create(&threadIDs[i], NULL, (void* (*)(void*))dijkstraThread, (void*)(devicePlans + i));
+    }
+
+    // Wait for the results from all threads
+    for (unsigned int i = 0; i < totalDeviceCount; i++)
+    {
+        pthread_join(threadIDs[i], NULL);
+    }
+
+    free (devicePlans);
+    free (threadIDs);
+}
+
 

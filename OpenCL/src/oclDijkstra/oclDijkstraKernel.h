@@ -99,4 +99,33 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
 void runDijkstraMultiGPU( cl_context gpuContext, GraphData* graph, int *sourceVertices, int *endVertices,
                           float *outResultCosts, int numResults );
 
+///
+/// Run Dijkstra's shortest path on the GraphData provided to this function.  This
+/// function will compute the shortest path distance from sourceVertices[n] ->
+/// endVertices[n] and store the cost in outResultCosts[n].  The number of results
+/// it will compute is given by numResults.
+///
+/// This function will run the algorithm on as many GPUs as is available along with
+/// the CPU.  It will create N threads, one for each device, and chunk the workload up to perform
+/// (numResults / N) searches per device.
+///
+/// \param gpuContext Current GPU context, must be created by caller
+/// \param cpuContext Current CPU context, must be created by caller
+/// \param graph Structure containing the vertex, edge, and weight arra
+///              for the input graph
+/// \param startVertices Indices into the vertex array from which to
+///                      start the search
+/// \param endVertices Indices into the vertex array from which to end
+///                    the search.
+/// \param outResultsCosts A pre-allocated array where the results for
+///                        each shortest path search will be written
+/// \param numResults Should be the size of all three passed inarrays
+///
+///
+void runDijkstraMultiGPUandCPU( cl_context gpuContext, cl_context cpuContext, GraphData* graph,
+                                int *sourceVertices, int *endVertices,
+                                float *outResultCosts, int numResults );
+
+
+
 #endif // DIJKSTRA_KERNEL_H
