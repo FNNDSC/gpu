@@ -62,7 +62,7 @@ __kernel  void OCL_SSSP_KERNEL1(__global int *vertexArray, __global int *edgeArr
 ///
 __kernel  void OCL_SSSP_KERNEL2(__global int *vertexArray, __global int *edgeArray, __global float *weightArray,
                                 __global unsigned char *maskArray, __global float *costArray, __global float *updatingCostArray,
-                                int endVertex )
+                                int endVertex)
 {
     // access thread id
     int tid = get_global_id(0);
@@ -80,6 +80,7 @@ __kernel  void OCL_SSSP_KERNEL2(__global int *vertexArray, __global int *edgeArr
 
     updatingCostArray[tid] = costArray[tid];
 }
+
 
 ///
 /// Kernel to initialize buffers

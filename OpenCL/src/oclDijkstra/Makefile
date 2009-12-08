@@ -39,7 +39,7 @@ EXECUTABLE	:= oclDijkstra
 # C/C++ source files (compiled with gcc / c++)
 CCFILES		:= oclDijkstra.cpp \
 				oclDijkstraKernel.cpp
-
+				
 
 ################################################################################
 # Rules and targets

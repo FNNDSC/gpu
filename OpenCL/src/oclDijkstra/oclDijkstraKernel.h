@@ -54,7 +54,11 @@ typedef struct
 ///
 /// This function will run the algorithm on a single GPU.
 ///
-/// \param gpuContext OpenCL GPU context
+/// \param gpuContext Current GPU context, must be created by caller
+/// \param deviceId The device ID on which to run the kernel.  This can
+///                 be determined externally by the caller or the multi
+///                 GPU version will automatically split the work across
+///                 devices
 /// \param graph Structure containing the vertex, edge, and weight arra
 ///              for the input graph
 /// \param startVertices Indices into the vertex array from which to
@@ -65,8 +69,9 @@ typedef struct
 ///                        each shortest path search will be written
 /// \param numResults Should be the size of all three passed inarrays
 ///
-void runDijkstra( cl_context gpuContext, GraphData* graph, int *sourceVertices, int *endVertices,
-                   float *outResultCosts, int numResults );
+void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph,
+                  int *sourceVertices, int *endVertices, float *outResultCosts,
+                  int numResults );
 
 
 ///
@@ -79,6 +84,7 @@ void runDijkstra( cl_context gpuContext, GraphData* graph, int *sourceVertices, 
 /// create N threads, one for each GPU, and chunk the workload up to perform
 /// (numResults / N) searches per GPU.
 ///
+/// \param gpuContext Current GPU context, must be created by caller
 /// \param graph Structure containing the vertex, edge, and weight arra
 ///              for the input graph
 /// \param startVertices Indices into the vertex array from which to

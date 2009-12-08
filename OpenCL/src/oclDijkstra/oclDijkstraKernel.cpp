@@ -16,6 +16,7 @@
 //
 #include <float.h>
 #include <oclUtils.h>
+#include <pthread.h>
 #include "oclDijkstraKernel.h"
 
 ///
@@ -27,8 +28,11 @@
 // the work on a per-GPU basis.
 typedef struct
 {
+    // GPU context
+    cl_context context;
+
     // GPU number to run algorithm on
-    int device;
+    cl_device_id deviceId;
 
     // Pointer to graph data
     GraphData *graph;
@@ -56,7 +60,10 @@ typedef struct
 
 ///
 /// Load and build an OpenCL program from source file
+/// \param gpuContext GPU context on which to load and build the program
+/// \param fileName File name of source file that holds the kernels
 /// \return Handle to the program
+///
 cl_program loadAndBuildProgram( cl_context gpuContext, const char *fileName )
 {
     size_t programLength;
@@ -180,6 +187,15 @@ void initializeOCLBuffers(cl_command_queue commandQueue, cl_kernel initializeKer
     shrCheckError(errNum, CL_SUCCESS);
 }
 
+///
+/// Worker thread for running the algorithm on one of the GPUs
+///
+void dijkstraThread(GPUPlan *plan)
+{
+    runDijkstra( plan->context, plan->deviceId, plan->graph, plan->sourceVertices,
+                 plan->endVertices, plan->outResultCosts, plan->numResults );
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 //
 //  Public Functions
@@ -194,6 +210,11 @@ void initializeOCLBuffers(cl_command_queue commandQueue, cl_kernel initializeKer
 ///
 /// This function will run the algorithm on a single GPU.
 ///
+/// \param gpuContext Current GPU context, must be created by caller
+/// \param deviceId The device ID on which to run the kernel.  This can
+///                 be determined externally by the caller or the multi
+///                 GPU version will automatically split the work across
+///                 devices
 /// \param graph Structure containing the vertex, edge, and weight arra
 ///              for the input graph
 /// \param startVertices Indices into the vertex array from which to
@@ -204,15 +225,9 @@ void initializeOCLBuffers(cl_command_queue commandQueue, cl_kernel initializeKer
 ///                        each shortest path search will be written
 /// \param numResults Should be the size of all three passed inarrays
 ///
-void runDijkstra( cl_context gpuContext, GraphData* graph, int *sourceVertices, int *endVertices,
-                   float *outResultCosts, int numResults)
+void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph,
+                  int *sourceVertices, int *endVertices, float *outResultCosts, int numResults)
 {
-    cl_device_id deviceId;
-
-    // Grab the highest performance GPU
-    deviceId = oclGetMaxFlopsDev( gpuContext );
-    oclPrintDevInfo(LOGBOTH, deviceId);
-
     // Create command queue
     cl_int errNum;
     cl_command_queue commandQueue;
@@ -236,7 +251,7 @@ void runDijkstra( cl_context gpuContext, GraphData* graph, int *sourceVertices, 
 
     // Allocate buffers in Device memory
     allocateOCLBuffers( gpuContext, commandQueue, graph, &vertexArrayDevice, &edgeArrayDevice, &weightArrayDevice,
-                        &maskArrayDevice, &costArrayDevice, &updatingCostArrayDevice );
+                        &maskArrayDevice, &costArrayDevice, &updatingCostArrayDevice);
 
 
     // Create the Kernels
@@ -276,7 +291,6 @@ void runDijkstra( cl_context gpuContext, GraphData* graph, int *sourceVertices, 
     errNum |= clSetKernelArg(ssspKernel2, 5, sizeof(cl_mem), &updatingCostArrayDevice);
     shrCheckError(errNum, CL_SUCCESS);
 
-
     unsigned char *maskArrayHost = (unsigned char*) malloc(sizeof(unsigned char) * graph->vertexCount);
 
     shrLog(LOGBOTH, 0.0, "Num results: %d\n", numResults);
@@ -308,19 +322,20 @@ void runDijkstra( cl_context gpuContext, GraphData* graph, int *sourceVertices, 
 
             // execute the kernel
             errNum = clEnqueueNDRangeKernel(commandQueue, ssspKernel1, 1, 0, globalWorkSize, localWorkSize,
-                                            0, NULL, NULL);
+                                           0, NULL, NULL);
             shrCheckError(errNum, CL_SUCCESS);
 
 
             errNum = clEnqueueNDRangeKernel(commandQueue, ssspKernel2, 1, 0, globalWorkSize, localWorkSize,
-                                            0, NULL, NULL);
+                                           0, NULL, NULL);
             shrCheckError(errNum, CL_SUCCESS);
 
             errNum = clEnqueueReadBuffer(commandQueue, maskArrayDevice, CL_FALSE, 0, sizeof(unsigned char) * graph->vertexCount,
-                                          maskArrayHost, 0, NULL, &readDone);
+                                         maskArrayHost, 0, NULL, &readDone);
             shrCheckError(errNum, CL_SUCCESS);
             clWaitForEvents(1, &readDone);
         }
+
 
         float result;
 
@@ -362,6 +377,7 @@ void runDijkstra( cl_context gpuContext, GraphData* graph, int *sourceVertices, 
 /// create N threads, one for each GPU, and chunk the workload up to perform
 /// (numResults / N) searches per GPU.
 ///
+/// \param gpuContext Current GPU context, must be created by caller
 /// \param graph Structure containing the vertex, edge, and weight arra
 ///              for the input graph
 /// \param startVertices Indices into the vertex array from which to
@@ -373,59 +389,66 @@ void runDijkstra( cl_context gpuContext, GraphData* graph, int *sourceVertices, 
 /// \param numResults Should be the size of all three passed inarrays
 ///
 ///
-
 void runDijkstraMultiGPU( cl_context gpuContext, GraphData* graph, int *sourceVertices, int *endVertices,
                           float *outResultCosts, int numResults )
 {
-    /*
-    int numGPUs;
 
-    cutilSafeCall( cudaGetDeviceCount(&numGPUs) );
-    printf("CUDA-capable device count: %i\n", numGPUs);
+    // Find out how many GPU's to compute on all available GPUs
+    cl_int errNum;
+    size_t deviceBytes;
+    cl_uint deviceCount;
 
-    if (numGPUs == 0)
+    errNum = clGetContextInfo(gpuContext, CL_CONTEXT_DEVICES, 0, NULL, &deviceBytes);
+    shrCheckError(errNum, CL_SUCCESS);
+    deviceCount = (cl_uint)deviceBytes/sizeof(cl_device_id);
+
+    if (deviceCount == 0)
     {
-        // ERORR: no GPUs present!
+        shrLog(LOGBOTH, 0.0, "ERROR: no GPUs present!");
         return;
     }
 
-    GPUPlan *gpuPlans = (GPUPlan*) malloc(sizeof(GPUPlan) * numGPUs);
-    CUTThread *threadIDs = (CUTThread*) malloc(sizeof(CUTThread) * numGPUs);
+    GPUPlan *gpuPlans = (GPUPlan*) malloc(sizeof(GPUPlan) * deviceCount);
+    pthread_t *threadIDs = (pthread_t*) malloc(sizeof(pthread_t) * deviceCount);
 
     // Divide the workload out per GPU
-    int resultsPerGPU = numResults / numGPUs;
+    int resultsPerGPU = numResults / deviceCount;
 
     int offset = 0;
 
-    for (int i = 0; i < numGPUs; i++)
+    for (unsigned int i = 0; i < deviceCount; i++)
     {
-        gpuPlans[i].device = i;
+        gpuPlans[i].context = gpuContext;
+        gpuPlans[i].deviceId = oclGetDev(gpuContext, i);;
         gpuPlans[i].graph = graph;
         gpuPlans[i].sourceVertices = &sourceVertices[offset];
         gpuPlans[i].endVertices = &endVertices[offset];
         gpuPlans[i].outResultCosts = &outResultCosts[offset];
         gpuPlans[i].numResults = resultsPerGPU;
 
+        oclPrintDevInfo(LOGBOTH, gpuPlans[i].deviceId);
         offset += resultsPerGPU;
     }
 
     // Add any remaining work to the last GPU
     if (offset < numResults)
     {
-        gpuPlans[numGPUs - 1].numResults += (numResults - offset);
+        gpuPlans[deviceCount - 1].numResults += (numResults - offset);
     }
 
     // Launch all the threads
-    for (int i = 0; i < numGPUs; i++)
+    for (unsigned int i = 0; i < deviceCount; i++)
     {
-        threadIDs[i] = cutStartThread((CUT_THREADROUTINE)dijkstraThread, (void*)(gpuPlans + i));
+        pthread_create(&threadIDs[i], NULL, (void* (*)(void*))dijkstraThread, (void*)(gpuPlans + i));
     }
 
     // Wait for the results from all threads
-    cutWaitForThreads(threadIDs, numGPUs);
+    for (unsigned int i = 0; i < deviceCount; i++)
+    {
+        pthread_join(threadIDs[i], NULL);
+    }
 
     free (gpuPlans);
     free (threadIDs);
-    */
 }
 
