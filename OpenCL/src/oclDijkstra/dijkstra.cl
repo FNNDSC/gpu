@@ -62,20 +62,16 @@ __kernel  void OCL_SSSP_KERNEL1(__global int *vertexArray, __global int *edgeArr
 ///
 __kernel  void OCL_SSSP_KERNEL2(__global int *vertexArray, __global int *edgeArray, __global float *weightArray,
                                 __global unsigned char *maskArray, __global float *costArray, __global float *updatingCostArray,
-                                int endVertex)
+                                int vertexCount)
 {
     // access thread id
     int tid = get_global_id(0);
 
+
     if (costArray[tid] > updatingCostArray[tid])
     {
         costArray[tid] = updatingCostArray[tid];
-
-        // Stop if we have hit the final vertex
-        if (tid != endVertex)
-        {
-            maskArray[tid] = 1;
-        }
+        maskArray[tid] = 1;
     }
 
     updatingCostArray[tid] = costArray[tid];
@@ -86,10 +82,11 @@ __kernel  void OCL_SSSP_KERNEL2(__global int *vertexArray, __global int *edgeArr
 /// Kernel to initialize buffers
 ///
 __kernel void initializeBuffers( __global unsigned char *maskArray, __global float *costArray, __global float *updatingCostArray,
-                                 int sourceVertex )
+                                 int sourceVertex, int vertexCount )
 {
     // access thread id
-    unsigned int tid = get_global_id(0);
+    int tid = get_global_id(0);
+
 
     if (sourceVertex == tid)
     {
@@ -103,4 +100,5 @@ __kernel void initializeBuffers( __global unsigned char *maskArray, __global flo
         costArray[tid] = FLT_MAX;
         updatingCostArray[tid] = FLT_MAX;
     }
+
 }

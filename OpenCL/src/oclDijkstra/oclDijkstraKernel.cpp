@@ -118,7 +118,8 @@ bool maskArrayEmpty(unsigned char *maskArray, int count)
 ///
 void allocateOCLBuffers(cl_context gpuContext, cl_command_queue commandQueue, GraphData *graph,
                         cl_mem *vertexArrayDevice, cl_mem *edgeArrayDevice, cl_mem *weightArrayDevice,
-                        cl_mem *maskArrayDevice, cl_mem *costArrayDevice, cl_mem *updatingCostArrayDevice)
+                        cl_mem *maskArrayDevice, cl_mem *costArrayDevice, cl_mem *updatingCostArrayDevice,
+                        size_t globalWorkSize)
 {
     cl_int errNum;
     cl_mem hostVertexArrayBuffer;
@@ -139,17 +140,17 @@ void allocateOCLBuffers(cl_context gpuContext, cl_command_queue commandQueue, Gr
     shrCheckError(errNum, CL_SUCCESS);
 
     // Now create all of the GPU buffers
-    *vertexArrayDevice = clCreateBuffer(gpuContext, CL_MEM_READ_ONLY, sizeof(int) * graph->vertexCount, NULL, &errNum);
+    *vertexArrayDevice = clCreateBuffer(gpuContext, CL_MEM_READ_ONLY, sizeof(int) * globalWorkSize, NULL, &errNum);
     shrCheckError(errNum, CL_SUCCESS);
     *edgeArrayDevice = clCreateBuffer(gpuContext, CL_MEM_READ_ONLY, sizeof(int) * graph->edgeCount, NULL, &errNum);
     shrCheckError(errNum, CL_SUCCESS);
     *weightArrayDevice = clCreateBuffer(gpuContext, CL_MEM_READ_ONLY, sizeof(float) * graph->edgeCount, NULL, &errNum);
     shrCheckError(errNum, CL_SUCCESS);
-    *maskArrayDevice = clCreateBuffer(gpuContext, CL_MEM_READ_WRITE, sizeof(unsigned char) * graph->vertexCount, NULL, &errNum);
+    *maskArrayDevice = clCreateBuffer(gpuContext, CL_MEM_READ_WRITE, sizeof(unsigned char) * globalWorkSize, NULL, &errNum);
     shrCheckError(errNum, CL_SUCCESS);
-    *costArrayDevice = clCreateBuffer(gpuContext, CL_MEM_READ_WRITE, sizeof(float) * graph->vertexCount, NULL, &errNum);
+    *costArrayDevice = clCreateBuffer(gpuContext, CL_MEM_READ_WRITE, sizeof(float) * globalWorkSize, NULL, &errNum);
     shrCheckError(errNum, CL_SUCCESS);
-    *updatingCostArrayDevice = clCreateBuffer(gpuContext, CL_MEM_READ_WRITE, sizeof(float) * graph->vertexCount, NULL, &errNum);
+    *updatingCostArrayDevice = clCreateBuffer(gpuContext, CL_MEM_READ_WRITE, sizeof(float) * globalWorkSize, NULL, &errNum);
     shrCheckError(errNum, CL_SUCCESS);
 
     // Now queue up the data to be copied to the device
@@ -173,16 +174,15 @@ void allocateOCLBuffers(cl_context gpuContext, cl_command_queue commandQueue, Gr
 ///
 /// Initialize OpenCL buffers for single run of Dijkstra
 ///
-void initializeOCLBuffers(cl_command_queue commandQueue, cl_kernel initializeKernel, GraphData *graph)
+void initializeOCLBuffers(cl_command_queue commandQueue, cl_kernel initializeKernel, GraphData *graph,
+                          size_t maxWorkGroupSize)
 {
     cl_int errNum;
     // Set # of work items in work group and total in 1 dimensional range
-    size_t localWorkSize[1] = { 1 };
-    size_t globalWorkSize[1];
+    size_t localWorkSize = maxWorkGroupSize;
+    size_t globalWorkSize = shrRoundUp(localWorkSize, graph->vertexCount);
 
-    globalWorkSize[0] = graph->vertexCount;
-
-    errNum = clEnqueueNDRangeKernel(commandQueue, initializeKernel, 1, 0, globalWorkSize, localWorkSize,
+    errNum = clEnqueueNDRangeKernel(commandQueue, initializeKernel, 1, NULL, &globalWorkSize, &localWorkSize,
                                     0, NULL, NULL);
     shrCheckError(errNum, CL_SUCCESS);
 }
@@ -193,7 +193,9 @@ void initializeOCLBuffers(cl_command_queue commandQueue, cl_kernel initializeKer
 void dijkstraThread(DevicePlan *plan)
 {
     runDijkstra( plan->context, plan->deviceId, plan->graph, plan->sourceVertices,
-                 plan->endVertices, plan->outResultCosts, plan->numResults );
+                 plan->outResultCosts, plan->numResults );
+
+    shrLog(LOGBOTH, 0.0, "Thread Done Device (%d)\n", plan->deviceId );
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -219,14 +221,12 @@ void dijkstraThread(DevicePlan *plan)
 ///              for the input graph
 /// \param startVertices Indices into the vertex array from which to
 ///                      start the search
-/// \param endVertices Indices into the vertex array from which to end
-///                    the search.
 /// \param outResultsCosts A pre-allocated array where the results for
 ///                        each shortest path search will be written
 /// \param numResults Should be the size of all three passed inarrays
 ///
 void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph,
-                  int *sourceVertices, int *endVertices, float *outResultCosts, int numResults)
+                  int *sourceVertices, float *outResultCosts, int numResults)
 {
     // Create command queue
     cl_int errNum;
@@ -242,6 +242,16 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
         return;
     }
 
+    // Get the max workgroup size
+    size_t maxWorkGroupSize;
+    clGetDeviceInfo(deviceId, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxWorkGroupSize, NULL);
+    shrCheckError(errNum, CL_SUCCESS);
+    shrLog(LOGBOTH, 0.0, "MAX_WORKGROUP_SIZE: %d\n", maxWorkGroupSize);
+
+    // Set # of work items in work group and total in 1 dimensional range
+    size_t localWorkSize = maxWorkGroupSize;
+    size_t globalWorkSize = shrRoundUp(localWorkSize, graph->vertexCount);
+
     cl_mem vertexArrayDevice;
     cl_mem edgeArrayDevice;
     cl_mem weightArrayDevice;
@@ -251,7 +261,7 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
 
     // Allocate buffers in Device memory
     allocateOCLBuffers( gpuContext, commandQueue, graph, &vertexArrayDevice, &edgeArrayDevice, &weightArrayDevice,
-                        &maskArrayDevice, &costArrayDevice, &updatingCostArrayDevice);
+                        &maskArrayDevice, &costArrayDevice, &updatingCostArrayDevice, globalWorkSize);
 
 
     // Create the Kernels
@@ -263,6 +273,8 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
     errNum |= clSetKernelArg(initializeBuffersKernel, 0, sizeof(cl_mem), &maskArrayDevice);
     errNum |= clSetKernelArg(initializeBuffersKernel, 1, sizeof(cl_mem), &costArrayDevice);
     errNum |= clSetKernelArg(initializeBuffersKernel, 2, sizeof(cl_mem), &updatingCostArrayDevice);
+    // 3 set below in loop
+    errNum |= clSetKernelArg(initializeBuffersKernel, 4, sizeof(cl_mem), &graph->vertexCount);
     shrCheckError(errNum, CL_SUCCESS);
 
     // Kernel 1
@@ -289,6 +301,8 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
     errNum |= clSetKernelArg(ssspKernel2, 3, sizeof(cl_mem), &maskArrayDevice);
     errNum |= clSetKernelArg(ssspKernel2, 4, sizeof(cl_mem), &costArrayDevice);
     errNum |= clSetKernelArg(ssspKernel2, 5, sizeof(cl_mem), &updatingCostArrayDevice);
+    errNum |= clSetKernelArg(ssspKernel2, 6, sizeof(int), &graph->vertexCount);
+
     shrCheckError(errNum, CL_SUCCESS);
 
     unsigned char *maskArrayHost = (unsigned char*) malloc(sizeof(unsigned char) * graph->vertexCount);
@@ -299,11 +313,10 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
     {
 
         errNum |= clSetKernelArg(initializeBuffersKernel, 3, sizeof(int), &sourceVertices[i]);
-        errNum |= clSetKernelArg(ssspKernel2, 6, sizeof(int), &endVertices[i]);
         shrCheckError(errNum, CL_SUCCESS);
 
         // Initialize mask array to false, C and U to infiniti
-        initializeOCLBuffers( commandQueue, initializeBuffersKernel, graph );
+        initializeOCLBuffers( commandQueue, initializeBuffersKernel, graph, maxWorkGroupSize );
 
         // Read mask array from device -> host
         cl_event readDone;
@@ -314,19 +327,15 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
 
         while(!maskArrayEmpty(maskArrayHost, graph->vertexCount))
         {
-            // Set # of work items in work group and total in 1 dimensional range
-            size_t localWorkSize[1] = { 1 };
-            size_t globalWorkSize[1];
-
-            globalWorkSize[0] = graph->vertexCount;
+            size_t localWorkSize = maxWorkGroupSize;
+            size_t globalWorkSize = shrRoundUp(localWorkSize, graph->vertexCount);
 
             // execute the kernel
-            errNum = clEnqueueNDRangeKernel(commandQueue, ssspKernel1, 1, 0, globalWorkSize, localWorkSize,
+            errNum = clEnqueueNDRangeKernel(commandQueue, ssspKernel1, 1, 0, &globalWorkSize, &localWorkSize,
                                            0, NULL, NULL);
             shrCheckError(errNum, CL_SUCCESS);
 
-
-            errNum = clEnqueueNDRangeKernel(commandQueue, ssspKernel2, 1, 0, globalWorkSize, localWorkSize,
+            errNum = clEnqueueNDRangeKernel(commandQueue, ssspKernel2, 1, 0, &globalWorkSize, &localWorkSize,
                                            0, NULL, NULL);
             shrCheckError(errNum, CL_SUCCESS);
 
@@ -336,17 +345,12 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
             clWaitForEvents(1, &readDone);
         }
 
-
-        float result;
-
         // Copy the result back
-        errNum = clEnqueueReadBuffer(commandQueue, costArrayDevice, CL_FALSE, endVertices[i] * sizeof(float), sizeof(float),
-                                     &result, 0, NULL, &readDone);
+        errNum = clEnqueueReadBuffer(commandQueue, costArrayDevice, CL_FALSE, 0, sizeof(float) * graph->vertexCount,
+                                     &outResultCosts[i * graph->vertexCount], 0, NULL, &readDone);
         shrCheckError(errNum, CL_SUCCESS);
         clWaitForEvents(1, &readDone);
-        outResultCosts[i] = result;
     }
-
 
     free (maskArrayHost);
 
@@ -389,7 +393,7 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
 /// \param numResults Should be the size of all three passed inarrays
 ///
 ///
-void runDijkstraMultiGPU( cl_context gpuContext, GraphData* graph, int *sourceVertices, int *endVertices,
+void runDijkstraMultiGPU( cl_context gpuContext, GraphData* graph, int *sourceVertices,
                           float *outResultCosts, int numResults )
 {
 
@@ -422,8 +426,7 @@ void runDijkstraMultiGPU( cl_context gpuContext, GraphData* graph, int *sourceVe
         devicePlans[i].deviceId = oclGetDev(gpuContext, i);;
         devicePlans[i].graph = graph;
         devicePlans[i].sourceVertices = &sourceVertices[offset];
-        devicePlans[i].endVertices = &endVertices[offset];
-        devicePlans[i].outResultCosts = &outResultCosts[offset];
+        devicePlans[i].outResultCosts = &outResultCosts[offset * graph->vertexCount];
         devicePlans[i].numResults = resultsPerDevice;
 
         oclPrintDevInfo(LOGBOTH, devicePlans[i].deviceId);
@@ -468,17 +471,16 @@ void runDijkstraMultiGPU( cl_context gpuContext, GraphData* graph, int *sourceVe
 ///              for the input graph
 /// \param startVertices Indices into the vertex array from which to
 ///                      start the search
-/// \param endVertices Indices into the vertex array from which to end
-///                    the search.
 /// \param outResultsCosts A pre-allocated array where the results for
 ///                        each shortest path search will be written
 /// \param numResults Should be the size of all three passed inarrays
 ///
 ///
 void runDijkstraMultiGPUandCPU( cl_context gpuContext, cl_context cpuContext, GraphData* graph,
-                                int *sourceVertices, int *endVertices,
+                                int *sourceVertices,
                                 float *outResultCosts, int numResults )
 {
+    float ratioCPUtoGPU = 2.26; // CPU seems to run it at 2.26X on GT120 GPU
 
     // Find out how many GPU's to compute on all available GPUs
     cl_int errNum;
@@ -511,8 +513,11 @@ void runDijkstraMultiGPUandCPU( cl_context gpuContext, cl_context cpuContext, Gr
     DevicePlan *devicePlans = (DevicePlan*) malloc(sizeof(DevicePlan) * totalDeviceCount);
     pthread_t *threadIDs = (pthread_t*) malloc(sizeof(pthread_t) * totalDeviceCount);
 
+    int gpuResults = numResults / (ratioCPUtoGPU);
+    int cpuResults = numResults - gpuResults;
+
     // Divide the workload out per device
-    int resultsPerDevice = numResults / totalDeviceCount;
+    int resultsPerGPU = gpuResults / totalDeviceCount;
 
     int offset = 0;
 
@@ -523,14 +528,15 @@ void runDijkstraMultiGPUandCPU( cl_context gpuContext, cl_context cpuContext, Gr
         devicePlans[curDevice].deviceId = oclGetDev(gpuContext, i);;
         devicePlans[curDevice].graph = graph;
         devicePlans[curDevice].sourceVertices = &sourceVertices[offset];
-        devicePlans[curDevice].endVertices = &endVertices[offset];
-        devicePlans[curDevice].outResultCosts = &outResultCosts[offset];
-        devicePlans[curDevice].numResults = resultsPerDevice;
+        devicePlans[curDevice].outResultCosts = &outResultCosts[offset * graph->vertexCount];
+        devicePlans[curDevice].numResults = resultsPerGPU;
 
         oclPrintDevInfo(LOGBOTH, devicePlans[curDevice].deviceId);
-        offset += resultsPerDevice;
+        offset += resultsPerGPU;
         curDevice++;
     }
+
+    int resultsPerCPU = cpuResults;
 
     for (unsigned int i = 0; i < cpuDeviceCount; i++)
     {
@@ -538,12 +544,11 @@ void runDijkstraMultiGPUandCPU( cl_context gpuContext, cl_context cpuContext, Gr
         devicePlans[curDevice].deviceId = oclGetDev(cpuContext, i);;
         devicePlans[curDevice].graph = graph;
         devicePlans[curDevice].sourceVertices = &sourceVertices[offset];
-        devicePlans[curDevice].endVertices = &endVertices[offset];
-        devicePlans[curDevice].outResultCosts = &outResultCosts[offset];
-        devicePlans[curDevice].numResults = resultsPerDevice;
+        devicePlans[curDevice].outResultCosts = &outResultCosts[offset * graph->vertexCount];
+        devicePlans[curDevice].numResults = resultsPerCPU;
 
         oclPrintDevInfo(LOGBOTH, devicePlans[curDevice].deviceId);
-        offset += resultsPerDevice;
+        offset += resultsPerCPU;
         curDevice++;
     }
 

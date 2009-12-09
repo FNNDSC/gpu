@@ -27,6 +27,16 @@
 #include "oclDijkstraKernel.h"
 
 ///
+//  Macro Options
+//
+//#define DO_CPU
+//#define DO_GPU
+//#define DO_MULTI_GPU
+#define DO_MULTI_GPU_CPU
+
+//#define CITY_DATA
+
+///
 //  Some test data
 //      http://en.literateprograms.org/Dijkstra%27s_algorithm_%28Scala%29
 const char *vNames[] =
@@ -119,6 +129,28 @@ float weightArray[] =
 // Helper functions
 ////////////////////////////////////////////////////////////////////////////////
 
+///
+//  Generate a random graph
+//
+void generateRandomGraph(GraphData *graph, int numVertices, int neighborsPerVertex)
+{
+    graph->vertexCount = numVertices;
+    graph->vertexArray = (int*) malloc(graph->vertexCount * sizeof(int));
+    graph->edgeCount = numVertices * neighborsPerVertex;
+    graph->edgeArray = (int*)malloc(graph->edgeCount * sizeof(int));
+    graph->weightArray = (float*)malloc(graph->edgeCount * sizeof(float));
+
+    for(int i = 0; i < graph->vertexCount; i++)
+    {
+        graph->vertexArray[i] = i * neighborsPerVertex;
+    }
+
+    for(int i = 0; i < graph->edgeCount; i++)
+    {
+        graph->edgeArray[i] = (rand() % graph->vertexCount);
+        graph->weightArray[i] = (float)(rand() % 1000) / 1000.0f;
+    }
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
@@ -146,91 +178,95 @@ int main(int argc, const char **argv)
 
     // Allocate memory for arrays
     GraphData graph;
+#ifdef CITY_DATA
     graph.vertexCount = sizeof(vertexArray) / sizeof(int);
     graph.edgeCount = sizeof(edgeArray) / sizeof(int);
     graph.vertexArray = &vertexArray[0];
     graph.edgeArray = &edgeArray[0];
     graph.weightArray = &weightArray[0];
+#else
+    generateRandomGraph(&graph, 98000, 100);
+#endif
 
 
     printf("Vertex Count: %d\n", graph.vertexCount);
     printf("Edge Count: %d\n", graph.edgeCount);
 
     std::vector<int> sourceVertices;
-    std::vector<int> endVertices;
 
-    for (int k = 0; k < 250; k++)
+
+    for(int source = 0; source < 200; source++)
     {
-       for(int source = 0; source < graph.vertexCount; source++)
-       {
-           for (int i = 0; i < graph.vertexCount; i++ )
-           {
-               if (i != source)
-               {
-                   sourceVertices.push_back(source);
-                   endVertices.push_back(i);
-               }
-           }
-       }
+        sourceVertices.push_back(source);
     }
 
     int *sourceVertArray = (int*) malloc(sizeof(int) * sourceVertices.size());
     std::copy(sourceVertices.begin(), sourceVertices.end(), sourceVertArray);
 
-    int *endVertArray = (int*) malloc(sizeof(int) * endVertices.size());
-    std::copy(endVertices.begin(), endVertices.end(), endVertArray);
-
-    float *results = (float*) malloc(sizeof(float) * endVertices.size());
+    float *results = (float*) malloc(sizeof(float) * sourceVertices.size() * graph.vertexCount);
 
 
     // Run Dijkstra's algorithm
     shrDeltaT(0);
+#ifdef DO_CPU
     double startTimeCPU = shrDeltaT(0);
-
     runDijkstra(cpuContext, oclGetMaxFlopsDev(cpuContext), &graph, sourceVertArray,
-                endVertArray, results, sourceVertices.size() );
-
+                results, sourceVertices.size() );
     double endTimeCPU = shrDeltaT(0);
+#endif
 
+#ifdef DO_GPU
     double startTimeGPU = shrDeltaT(0);
-
     runDijkstra(gpuContext, oclGetMaxFlopsDev(gpuContext), &graph, sourceVertArray,
-                endVertArray, results, sourceVertices.size() );
-
+                results, sourceVertices.size() );
     double endTimeGPU = shrDeltaT(0);
+#endif
 
-
+#ifdef DO_MULTI_GPU
     double startTimeMultiGPU = shrDeltaT(0);
-
     runDijkstraMultiGPU(gpuContext, &graph, sourceVertArray,
-                        endVertArray, results, sourceVertices.size() );
-
+                        results, sourceVertices.size() );
     double endTimeMultiGPU = shrDeltaT(0);
+#endif
 
+#ifdef DO_MULTI_GPU_CPU
     double startTimeGPUCPU = shrDeltaT(0);
     runDijkstraMultiGPUandCPU(gpuContext, cpuContext, &graph, sourceVertArray,
-                              endVertArray, results, sourceVertices.size() );
+                              results, sourceVertices.size() );
     double endTimeGPUCPU = shrDeltaT(0);
+#endif
 
-
-
-
+#ifdef CITY_DATA
     for (unsigned int i = 0; i < sourceVertices.size(); i++)
     {
-       printf("%s --> %s: %f\n", vNames[sourceVertArray[i]], vNames[endVertArray[i]], results[i] );
+        for (int j = 0; j < graph.vertexCount; j++)
+        {
+            if (i != j)
+            {
+                printf("%s --> %s: %f\n", vNames[sourceVertArray[i]], vNames[j], results[i * graph.vertexCount + j] );
+            }
+        }
     }
+#endif
 
 
-
+#ifdef DO_CPU
     shrLog(LOGBOTH, 0.0, "\nrunDijkstra - CPU Time:               %f s\n", endTimeCPU - startTimeCPU);
+#endif
+
+#ifdef DO_GPU
     shrLog(LOGBOTH, 0.0, "\nrunDijkstra - Single GPU Time:        %f s\n", endTimeGPU - startTimeGPU);
+#endif
+
+#ifdef DO_MULTI_GPU
     shrLog(LOGBOTH, 0.0, "\nrunDijkstra - Multi GPU Time:         %f s\n", endTimeMultiGPU - startTimeMultiGPU);
+#endif
+
+#ifdef DO_MULTI_GPU_CPU
     shrLog(LOGBOTH, 0.0, "\nrunDijkstra - Multi GPU and CPU Time: %f s\n", endTimeGPUCPU - startTimeGPUCPU);
-
-
+#endif
 
     free(sourceVertArray);
-    free(endVertArray);
     free(results);
 
     clReleaseContext(gpuContext);

@@ -63,15 +63,13 @@ typedef struct
 ///              for the input graph
 /// \param startVertices Indices into the vertex array from which to
 ///                      start the search
-/// \param endVertices Indices into the vertex array from which to end
-///                    the search.
 /// \param outResultsCosts A pre-allocated array where the results for
-///                        each shortest path search will be written
+///                        each shortest path search will be written.
+///                        This must be sized numResults * graph->numVertices.
 /// \param numResults Should be the size of all three passed inarrays
 ///
 void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph,
-                  int *sourceVertices, int *endVertices, float *outResultCosts,
-                  int numResults );
+                  int *sourceVertices, float *outResultCosts, int numResults );
 
 
 ///
@@ -89,14 +87,13 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
 ///              for the input graph
 /// \param startVertices Indices into the vertex array from which to
 ///                      start the search
-/// \param endVertices Indices into the vertex array from which to end
-///                    the search.
 /// \param outResultsCosts A pre-allocated array where the results for
-///                        each shortest path search will be written
+///                        each shortest path search will be written.
+///                        This must be sized numResults * graph->numVertices.
 /// \param numResults Should be the size of all three passed inarrays
 ///
 ///
-void runDijkstraMultiGPU( cl_context gpuContext, GraphData* graph, int *sourceVertices, int *endVertices,
+void runDijkstraMultiGPU( cl_context gpuContext, GraphData* graph, int *sourceVertices,
                           float *outResultCosts, int numResults );
 
 ///
@@ -115,16 +112,14 @@ void runDijkstraMultiGPU( cl_context gpuContext, GraphData* graph, int *sourceVe
 ///              for the input graph
 /// \param startVertices Indices into the vertex array from which to
 ///                      start the search
-/// \param endVertices Indices into the vertex array from which to end
-///                    the search.
 /// \param outResultsCosts A pre-allocated array where the results for
-///                        each shortest path search will be written
+///                        each shortest path search will be written.
+///                        This must be sized numResults * graph->numVertices.
 /// \param numResults Should be the size of all three passed inarrays
 ///
 ///
 void runDijkstraMultiGPUandCPU( cl_context gpuContext, cl_context cpuContext, GraphData* graph,
-                                int *sourceVertices, int *endVertices,
-                                float *outResultCosts, int numResults );
+                                int *sourceVertices, float *outResultCosts, int numResults );
 
 
 
