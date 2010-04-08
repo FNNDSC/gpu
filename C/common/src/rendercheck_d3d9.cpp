@@ -1,5 +1,5 @@
 /*
- * Copyright 1993-2009 NVIDIA Corporation.  All rights reserved.
+ * Copyright 1993-2010 NVIDIA Corporation.  All rights reserved.
  *
  * NVIDIA Corporation and its licensors retain all intellectual property and 
  * proprietary rights in and to this software and related documentation. 
@@ -38,7 +38,7 @@ bool CheckRenderD3D9::PPMvsPPM( const char *src_file, const char *ref_file, cons
         printf("CheckRenderD3D9::PPMvsPPM unable to find <%s> in <%s> Aborting comparison!\n", ref_file, exec_path);
         printf(">>> Check info.xml and [project//data] folder <%s> <<<\n", ref_file);
         printf("Aborting comparison!\n");
-        printf("  FAILED!\n");
+        printf("  FAILURE!\n");
         return false;
     }
 

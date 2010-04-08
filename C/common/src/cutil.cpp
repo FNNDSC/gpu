@@ -1,5 +1,5 @@
 /*
- * Copyright 1993-2009 NVIDIA Corporation.  All rights reserved.
+ * Copyright 1993-2010 NVIDIA Corporation.  All rights reserved.
  *
  * NVIDIA Corporation and its licensors retain all intellectual property and 
  * proprietary rights in and to this software and related documentation. 
@@ -13,22 +13,6 @@
  * 
  */
  
- /*
-* Copyright 1993-2009 NVIDIA Corporation.  All rights reserved.
-*
-* NVIDIA Corporation and its licensors retain all intellectual property and 
-* proprietary rights in and to this software and related documentation.
-* Any use, reproduction, disclosure, or distribution of this software
-* and related documentation without an express license agreement from 
-* NVIDIA Corporation is strictly prohibited.
-* 
-* Please refer to the applicable NVIDIA end user license agreement (EULA) 
-* associated with this source code for terms and conditions that govern 
-* your use of this NVIDIA software.
-* 
-*/
-
-
 /* CUda UTility Library */
 
 /* Credit: Cuda team for the PGM file reader / writer code. */
@@ -469,7 +453,9 @@ namespace
             {
                 error_count++;
 #ifdef _DEBUG
-//                printf("ERROR(epsilon=%4.3f), i=%d, (ref)0x%02x / (data)0x%02x / (diff)%d\n", max_error, i, reference[i], data[i], (unsigned int)diff);
+			if (error_count < 50) {
+                printf("\n    ERROR(epsilon=%4.3f), i=%d, (ref)0x%02x / (data)0x%02x / (diff)%d\n", max_error, i, reference[i], data[i], (unsigned int)diff);
+			}
 #endif
             }
         }
@@ -509,7 +495,9 @@ namespace
             {
                 error_count++;
 #ifdef _DEBUG
-//                printf("ERROR(epsilon=%4.3f), i=%d, (ref)0x%02x / (data)0x%02x / (diff)%d\n", max_error, i, reference[i], data[i], (unsigned int)diff);
+			if (error_count < 50) {
+                printf("\n    ERROR(epsilon=%4.3f), i=%d, (ref)0x%02x / (data)0x%02x / (diff)%d\n", max_error, i, reference[i], data[i], (unsigned int)diff);
+			}
 #endif
             }
         }
@@ -688,6 +676,8 @@ cutFindFilePath(const char* filename, const char* executable_path)
       (char*) malloc( sizeof(char) * (data_folder_len + filename_len + 1));
     strcpy(file_path, data_folder);
     strcat(file_path, filename);
+	size_t file_path_len = strlen(file_path);
+	file_path[file_path_len] = '\0';
     std::fstream fh0(file_path, std::fstream::in);
     if (fh0.good())
         return file_path;
@@ -717,7 +707,7 @@ cutFindFilePath(const char* filename, const char* executable_path)
     file_path[executable_dir_len] = '\0';
     strcat(file_path, projects_relative_path);
     strcat(file_path, exe);
-    size_t file_path_len = strlen(file_path);
+    file_path_len = strlen(file_path);
     if (*(file_path + file_path_len - 1) == 'e' &&
         *(file_path + file_path_len - 2) == 'x' &&
         *(file_path + file_path_len - 3) == 'e' &&
@@ -731,7 +721,9 @@ cutFindFilePath(const char* filename, const char* executable_path)
     }
     strcat(file_path, data_folder);
     strcat(file_path, filename);
-    std::fstream fh1(file_path, std::fstream::in);
+	file_path_len = strlen(file_path);
+	file_path[file_path_len] = '\0';
+	std::fstream fh1(file_path, std::fstream::in);
     if (fh1.good())
         return file_path;
     free( file_path);
@@ -1556,10 +1548,10 @@ cutComparePPM( const char *src_file, const char *ref_file,
 
 	if (error_count == 0) 
 	{ 
-		if(verboseErrors) std::cerr << "  PASSED!\n"; 
+		if(verboseErrors) std::cerr << "    OK\n\n"; 
 	} else 
 	{
-		if(verboseErrors) std::cerr << "  FAILED! "<<error_count<<" errors...\n";
+		if(verboseErrors) std::cerr << "    FAILURE!  "<<error_count<<" errors...\n\n";
 	}
 	return (error_count == 0)?CUTTrue:CUTFalse;  // returns true if all pixels pass
 }

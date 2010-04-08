@@ -1,5 +1,5 @@
 /*
- * Copyright 1993-2009 NVIDIA Corporation.  All rights reserved.
+ * Copyright 1993-2010 NVIDIA Corporation.  All rights reserved.
  *
  * NVIDIA Corporation and its licensors retain all intellectual property and 
  * proprietary rights in and to this software and related documentation. 
@@ -146,7 +146,7 @@ CheckRender::PGMvsPGM( const char *src_file, const char *ref_file, const float e
         printf("CheckRender::PGMvsPGM unable to find <%s> in <%s> Aborting comparison!\n", ref_file, m_ExecPath);
         printf(">>> Check info.xml and [project//data] folder <%s> <<<\n", ref_file);
         printf("Aborting comparison!\n", ref_file, m_ExecPath);
-        printf("  FAILED!\n");
+        printf("  FAILED\n");
         error_count++;
     } else {
 
@@ -174,9 +174,9 @@ CheckRender::PGMvsPGM( const char *src_file, const char *ref_file, const float e
     }
 
     if (error_count == 0) { 
-        printf("  PASSED!\n"); 
+        printf("  OK\n"); 
     } else {
-        printf("  FAILED! %d errors...\n", (unsigned int)error_count);
+		printf("  FAILURE: %d errors...\n", (unsigned int)error_count);
     }
     return (error_count == 0);  // returns true if all pixels pass
 }
@@ -192,7 +192,7 @@ CheckRender::PPMvsPPM( const char *src_file, const char *ref_file, const float e
         printf("CheckRender::PPMvsPPM unable to find <%s> in <%s> Aborting comparison!\n", ref_file, m_ExecPath);
         printf(">>> Check info.xml and [project//data] folder <%s> <<<\n", ref_file);
         printf("Aborting comparison!\n", ref_file, m_ExecPath);
-        printf("  FAILED!\n");
+        printf("  FAILED\n");
         error_count++;
     } 
 
@@ -205,7 +205,7 @@ CheckRender::PPMvsPPM( const char *src_file, const char *ref_file, const float e
     return (cutComparePPM( src_file, ref_file_path, epsilon, threshold, true ) == CUTTrue ? true : false);
 }
 
-void CheckRender::dumpBin(void *data, unsigned int bytes, char *filename) 
+void CheckRender::dumpBin(void *data, unsigned int bytes, const char *filename) 
 {
     printf("CheckRender::dumpBin: <%s>\n", filename);
     FILE *fp = fopen(filename, "wb");
@@ -230,7 +230,7 @@ bool CheckRender::compareBin2BinUint(const char *src_file, const char *ref_file,
         printf("compareBin2Bin <unsigned int>  unable to find <%s> in <%s>\n");
         printf(">>> Check info.xml and [project//data] folder <%s> <<<\n", ref_file);
         printf("Aborting comparison!\n", ref_file, m_ExecPath);
-        printf("  FAILED!\n");
+        printf("  FAILED\n");
         error_count++;
 
         if (src_fp) fclose(src_fp);
@@ -268,9 +268,9 @@ bool CheckRender::compareBin2BinUint(const char *src_file, const char *ref_file,
     }
 
     if (error_count == 0) { 
-        printf("  PASSED!\n"); 
+        printf("  OK\n"); 
     } else {
-        printf("  FAILED! %d errors...\n", (unsigned int)error_count);
+		printf("  FAILURE: %d errors...\n", (unsigned int)error_count);
     }
 
     return (error_count == 0);  // returns true if all pixels pass
@@ -292,7 +292,7 @@ bool CheckRender::compareBin2BinFloat(const char *src_file, const char *ref_file
         printf("compareBin2Bin <float> unable to find <%s> in <%s>\n", ref_file, m_ExecPath);
         printf(">>> Check info.xml and [project//data] folder <%s> <<<\n", m_ExecPath);
         printf("Aborting comparison!\n");
-        printf("  FAILED!\n");
+        printf("  FAILED\n");
         error_count++;
 
         if (src_fp) fclose(src_fp);
@@ -332,9 +332,9 @@ bool CheckRender::compareBin2BinFloat(const char *src_file, const char *ref_file
     }
 
     if (error_count == 0) { 
-        printf("  PASSED!\n"); 
+        printf("  OK\n"); 
     } else {
-        printf("  FAILED! %d errors...\n", (unsigned int)error_count);
+		printf("  FAILURE: %d errors...\n", (unsigned int)error_count);
     }
 
     return (error_count == 0);  // returns true if all pixels pass
@@ -1270,11 +1270,11 @@ bool CheckFBO::readback( GLuint width, GLuint height, GLuint bufObject )
             // Reading direct to FBO using glReadPixels
             glBindFramebufferEXT( GL_FRAMEBUFFER_EXT, bufObject );
             ret = checkStatus(__FILE__, __LINE__, true);
-            if (!ret) printf("CheckFBO::readback::glBindFramebufferEXT() fbo=%d checkStatus = %d\n", bufObject, ret);
+            if (!ret) printf("CheckFBO::readback::glBindFramebufferEXT() fbo=%d checkStatus = %d\n", (int)bufObject, (int)ret);
 
             glReadBuffer(static_cast<GLenum>(GL_COLOR_ATTACHMENT0_EXT));
             ret &= checkStatus(__FILE__, __LINE__, true);
-            if (!ret) printf("CheckFBO::readback::glReadBuffer() fbo=%d checkStatus = %d\n", bufObject, ret);
+            if (!ret) printf("CheckFBO::readback::glReadBuffer() fbo=%d checkStatus = %d\n", (int)bufObject, (int)ret);
 
             glReadPixels(0, 0, width, height, getPixelFormat(), GL_UNSIGNED_BYTE, m_pImageData);
 
