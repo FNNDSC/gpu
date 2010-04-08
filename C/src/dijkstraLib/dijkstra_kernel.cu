@@ -20,7 +20,6 @@
 #include <float.h>
 #include <multithreading.h>
 
-
 #include "dijkstra_kernel.h"
 
 ///
@@ -66,7 +65,7 @@ __global__  void CUDA_SSSP_KERNEL1( int *vertexArray, int *edgeArray, float *wei
                                     int vertexCount, int edgeCount )
 {
     // access thread id
-    unsigned int tid = threadIdx.x;
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
     if ( maskArray[tid] != 0 )
     {
@@ -104,21 +103,15 @@ __global__  void CUDA_SSSP_KERNEL1( int *vertexArray, int *edgeArray, float *wei
 /// is to stop the search after hitting endVertex
 ///
 __global__  void CUDA_SSSP_KERNEL2(  int *vertexArray, int *edgeArray, float *weightArray,
-                                     unsigned char *maskArray, float *costArray, float *updatingCostArray,
-                                     int endVertex )
+                                     unsigned char *maskArray, float *costArray, float *updatingCostArray)
 {
     // access thread id
-    unsigned int tid = threadIdx.x;
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (costArray[tid] > updatingCostArray[tid])
     {
         costArray[tid] = updatingCostArray[tid];
-
-        // Stop if we have hit the final vertex
-        if (tid != endVertex)
-        {
-            maskArray[tid] = 1;
-        }
+        maskArray[tid] = 1;
     }
 
     updatingCostArray[tid] = costArray[tid];
@@ -129,6 +122,22 @@ __global__  void CUDA_SSSP_KERNEL2(  int *vertexArray, int *edgeArray, float *we
 //  Private Functions
 //
 //
+
+///
+/// Round Up Division function
+///
+size_t roundUp(int group_size, int global_size) 
+{
+    int r = global_size % group_size;
+    if(r == 0) 
+    {
+        return global_size;
+    } 
+    else 
+    {
+        return global_size + group_size - r;
+    }
+}
 
 ///
 /// Check whether the mask array is empty.  This tells the algorithm whether
@@ -153,7 +162,7 @@ bool maskArrayEmpty(unsigned char *maskArray, int count)
 void allocateCUDABuffers(GraphData *graph,
                          int **vertexArrayDevice, int **edgeArrayDevice, float **weightArrayDevice,
                          unsigned char **maskArrayDevice, float **costArrayDevice, float **updatingCostArrayDevice,
-                         float **infinitiArrayDevice)
+                         float **infinitiArrayDevice, int globalWorkSize)
 {
     // V
     cutilSafeCall( cudaMalloc( (void**) vertexArrayDevice, sizeof(int) * graph->vertexCount) );
@@ -168,21 +177,21 @@ void allocateCUDABuffers(GraphData *graph,
     cutilSafeCall( cudaMemcpy( *weightArrayDevice, graph->weightArray, sizeof(float) * graph->edgeCount, cudaMemcpyHostToDevice) );
 
     // M, C, U
-    cutilSafeCall( cudaMalloc( (void**) maskArrayDevice, sizeof(unsigned char) * graph->vertexCount) );
-    cutilSafeCall( cudaMalloc( (void**) costArrayDevice, sizeof(float) * graph->vertexCount) );
-    cutilSafeCall( cudaMalloc( (void**) updatingCostArrayDevice, sizeof(float) * graph->vertexCount) );
+    cutilSafeCall( cudaMalloc( (void**) maskArrayDevice, sizeof(unsigned char) * globalWorkSize) );
+    cutilSafeCall( cudaMalloc( (void**) costArrayDevice, sizeof(float) * globalWorkSize) );
+    cutilSafeCall( cudaMalloc( (void**) updatingCostArrayDevice, sizeof(float) * globalWorkSize) );
 
     // This is quite annoying, but at the moment I can't find a way to set a float
     // value to a buffer in CUDA (cudaMemSet operates on bytes).  So I create an
     // infiniti array that is used to clear the buffers
-    float *infinityArray = (float*) malloc(sizeof(float) * graph->vertexCount);
-    for(int i = 0; i < graph->vertexCount; i++)
+    float *infinityArray = (float*) malloc(sizeof(float) * globalWorkSize);
+    for(int i = 0; i < globalWorkSize; i++)
     {
         infinityArray[i] = FLT_MAX;
     }
 
-    cutilSafeCall( cudaMalloc( (void**) infinitiArrayDevice, sizeof(float) * graph->vertexCount) );
-    cutilSafeCall( cudaMemcpy( *infinitiArrayDevice,infinityArray, sizeof(float) * graph->vertexCount, cudaMemcpyHostToDevice) );
+    cutilSafeCall( cudaMalloc( (void**) infinitiArrayDevice, sizeof(float) * globalWorkSize) );
+    cutilSafeCall( cudaMemcpy( *infinitiArrayDevice,infinityArray, sizeof(float) * globalWorkSize, cudaMemcpyHostToDevice) );
 
     free (infinityArray);
 }
@@ -192,14 +201,14 @@ void allocateCUDABuffers(GraphData *graph,
 ///
 void initializeCUDABuffers(GraphData *graph, int sourceVertex,
                            unsigned char *maskArrayDevice, float *costArrayDevice, float *updatingCostArrayDevice,
-                           float *infinityArrayDevice)
+                           float *infinityArrayDevice, int globalWorkSize)
 {
     cudaMemset( maskArrayDevice, 0, sizeof(unsigned char) * graph->vertexCount );
 
     // FUTURE OPTIMIZATION: Figure out how to do this with a memset, or at least something not requiring a
     //                      full memcpy.
-    cudaMemcpy( costArrayDevice, infinityArrayDevice, sizeof(float) * graph->vertexCount, cudaMemcpyDeviceToDevice );
-    cudaMemcpy( updatingCostArrayDevice, infinityArrayDevice, sizeof(float) * graph->vertexCount, cudaMemcpyDeviceToDevice );
+    cudaMemcpy( costArrayDevice, infinityArrayDevice, sizeof(float) * globalWorkSize, cudaMemcpyDeviceToDevice );
+    cudaMemcpy( updatingCostArrayDevice, infinityArrayDevice, sizeof(float) * globalWorkSize, cudaMemcpyDeviceToDevice );
 
     // Set M[S] = true, C[S] = 0, U[S] = 0
     cudaMemset( &maskArrayDevice[sourceVertex], 1, sizeof(unsigned char) );
@@ -215,7 +224,7 @@ CUT_THREADPROC dijkstraThread(GPUPlan *plan)
     // Set GPU device
     cutilSafeCall( cudaSetDevice(plan->device) );
 
-    runDijkstra( plan->graph, plan->sourceVertices, plan->endVertices,
+    runDijkstra( plan->graph, plan->sourceVertices, 
                  plan->outResultCosts, plan->numResults );
 
 }
@@ -245,8 +254,7 @@ CUT_THREADPROC dijkstraThread(GPUPlan *plan)
 ///                        each shortest path search will be written
 /// \param numResults Should be the size of all three passed inarrays
 ///
-void runDijkstra( GraphData* graph, int *sourceVertices, int *endVertices,
-                   float *outResultCosts, int numResults)
+void runDijkstra( GraphData* graph, int *sourceVertices, float *outResultCosts, int numResults )
 {
     int *vertexArrayDevice;
     int *edgeArrayDevice;
@@ -258,10 +266,14 @@ void runDijkstra( GraphData* graph, int *sourceVertices, int *endVertices,
 
 
 
+    // Set # of work items in work group and total in 1 dimensional range
+    size_t localWorkSize = 512;
+    size_t globalWorkSize = roundUp(localWorkSize, graph->vertexCount);
+    
     // Allocate buffers in Device memory
     allocateCUDABuffers( graph, &vertexArrayDevice, &edgeArrayDevice, &weightArrayDevice,
                          &maskArrayDevice, &costArrayDevice, &updatingCostArrayDevice,
-                         &infinityArrayDevice );
+                         &infinityArrayDevice, globalWorkSize);
 
     unsigned char *maskArrayHost = (unsigned char*) malloc(sizeof(unsigned char) * graph->vertexCount);
 
@@ -274,17 +286,16 @@ void runDijkstra( GraphData* graph, int *sourceVertices, int *endVertices,
         // Initialize mask array to false, C and U to infiniti
         initializeCUDABuffers( graph, sourceVertices[i],
                               maskArrayDevice, costArrayDevice, updatingCostArrayDevice,
-                              infinityArrayDevice );
-
-
-        dim3  grid( 1, 1, 1);
-        dim3  threads( graph->vertexCount, 1, 1);
-
-
+                              infinityArrayDevice, globalWorkSize);
+        
         cudaMemcpy( maskArrayHost, maskArrayDevice, sizeof(unsigned char) * graph->vertexCount, cudaMemcpyDeviceToHost );
 
         while(!maskArrayEmpty(maskArrayHost, graph->vertexCount))
         {
+            int gridSize = globalWorkSize / localWorkSize;
+
+            dim3  threads( localWorkSize, 1, 1);
+            dim3  grid( gridSize, 1, 1);    
             // execute the kernel
             CUDA_SSSP_KERNEL1<<< grid, threads >>>( vertexArrayDevice, edgeArrayDevice, weightArrayDevice,
                                                     maskArrayDevice, costArrayDevice, updatingCostArrayDevice,
@@ -292,23 +303,18 @@ void runDijkstra( GraphData* graph, int *sourceVertices, int *endVertices,
             CUT_CHECK_ERROR("CUDA_SSSP_KERNEL1");
 
             CUDA_SSSP_KERNEL2<<< grid, threads >>>( vertexArrayDevice, edgeArrayDevice, weightArrayDevice,
-                                                    maskArrayDevice, costArrayDevice, updatingCostArrayDevice,
-                                                    endVertices[i] );
+                                                    maskArrayDevice, costArrayDevice, updatingCostArrayDevice );
             CUT_CHECK_ERROR("CUDA_SSSP_KERNEL2");
 
             cudaMemcpy( maskArrayHost, maskArrayDevice, sizeof(unsigned char) * graph->vertexCount, cudaMemcpyDeviceToHost );
         }
 
-
-        float result;
-
         // Copy the result back
-        cutilSafeCall( cudaMemcpy( &result, &costArrayDevice[endVertices[i]], sizeof(float), cudaMemcpyDeviceToHost) );
-        outResultCosts[i] = result;
+        cutilSafeCall( cudaMemcpy( &outResultCosts[i * graph->vertexCount], &costArrayDevice[0], sizeof(float) * graph->vertexCount, cudaMemcpyDeviceToHost) );
     }
 
     cutilCheckError(cutStopTimer(timer));
-    printf("Kernel GPU Processing time: %f (ms) \n", cutGetTimerValue(timer));
+    //printf("Kernel GPU Processing time: %f (ms) \n", cutGetTimerValue(timer));
 
     free (maskArrayHost);
 
@@ -346,7 +352,7 @@ void runDijkstra( GraphData* graph, int *sourceVertices, int *endVertices,
 ///
 ///
 
-void runDijkstraMultiGPU( GraphData* graph, int *sourceVertices, int *endVertices,
+void runDijkstraMultiGPU( GraphData* graph, int *sourceVertices, 
                           float *outResultCosts, int numResults )
 {
     int numGPUs;
@@ -373,8 +379,7 @@ void runDijkstraMultiGPU( GraphData* graph, int *sourceVertices, int *endVertice
         gpuPlans[i].device = i;
         gpuPlans[i].graph = graph;
         gpuPlans[i].sourceVertices = &sourceVertices[offset];
-        gpuPlans[i].endVertices = &endVertices[offset];
-        gpuPlans[i].outResultCosts = &outResultCosts[offset];
+        gpuPlans[i].outResultCosts = &outResultCosts[offset * graph->vertexCount];
         gpuPlans[i].numResults = resultsPerGPU;
 
         offset += resultsPerGPU;
@@ -398,4 +403,110 @@ void runDijkstraMultiGPU( GraphData* graph, int *sourceVertices, int *endVertice
     free (gpuPlans);
     free (threadIDs);
 }
+
+///
+/// Run Dijkstra's shortest path on the GraphData provided to this function.  This
+/// function will compute the shortest path distance from sourceVertices[n] ->
+/// endVertices[n] and store the cost in outResultCosts[n].  The number of results
+/// it will compute is given by numResults.
+///
+/// This is a CPU *REFERENCE* implementation for use as a fallback.
+///
+/// \param graph Structure containing the vertex, edge, and weight arra
+///              for the input graph
+/// \param startVertices Indices into the vertex array from which to
+///                      start the search
+/// \param outResultsCosts A pre-allocated array where the results for
+///                        each shortest path search will be written.
+///                        This must be sized numResults * graph->numVertices.
+/// \param numResults Should be the size of all three passed inarrays
+///
+void runDijkstraRef( GraphData* graph, int *sourceVertices,
+                     float *outResultCosts, int numResults )
+{
+
+    // Create the arrays needed for processing the algorithm
+    float *costArray = new float[graph->vertexCount];
+    float *updatingCostArray = new float[graph->vertexCount];
+    unsigned char *maskArray = new unsigned char[graph->vertexCount];
+
+    for (int i = 0; i < numResults; i++)
+    {
+        // Initialize the buffer for this run
+        for (int v = 0; v < graph->vertexCount; v++)
+        {
+            if (v == sourceVertices[i])
+            {
+                maskArray[v] = 1;
+                costArray[v] = 0.0;
+                updatingCostArray[v] = 0.0;
+            }
+            else
+            {
+                maskArray[v] = 0;
+                costArray[v] = FLT_MAX;
+                updatingCostArray[v] = FLT_MAX;
+            }
+        }
+
+        while(!maskArrayEmpty(maskArray, graph->vertexCount))
+        {
+            // Equivalent of OCL_SSSP_KERNEL1()
+            for (int tid = 0; tid < graph->vertexCount; tid++)
+            {
+                if ( maskArray[tid] != 0 )
+                {
+                    maskArray[tid] = 0;
+
+                    int edgeStart = graph->vertexArray[tid];
+                    int edgeEnd;
+                    if (tid + 1 < (graph->vertexCount))
+                    {
+                        edgeEnd = graph->vertexArray[tid + 1];
+                    }
+                    else
+                    {
+                        edgeEnd = graph->edgeCount;
+                    }
+
+                    for(int edge = edgeStart; edge < edgeEnd; edge++)
+                    {
+                        int nid = graph->edgeArray[edge];
+
+                        // One note here: whereas the paper specified weightArray[nid], I
+                        //  found that the correct thing to do was weightArray[edge].  I think
+                        //  this was a typo in the paper.  Either that, or I misunderstood
+                        //  the data structure.
+                        if (updatingCostArray[nid] > (costArray[tid] + graph->weightArray[edge]))
+                        {
+                            updatingCostArray[nid] = (costArray[tid] + graph->weightArray[edge]);
+                        }
+                    }
+                }
+            }
+
+            // Equivalent of OCL_SSSP_KERNEL2()
+            for (int tid = 0; tid < graph->vertexCount; tid++)
+            {
+                if (costArray[tid] > updatingCostArray[tid])
+                {
+                    costArray[tid] = updatingCostArray[tid];
+                    maskArray[tid] = 1;
+                }
+
+                updatingCostArray[tid] = costArray[tid];
+            }
+        }
+
+        // Copy the result back
+        memcpy(&outResultCosts[i * graph->vertexCount], costArray, sizeof(float) * graph->vertexCount);
+    }
+
+    // Free temporary computation buffers
+    delete [] costArray;
+    delete [] updatingCostArray;
+    delete [] maskArray;
+}
+
+
 

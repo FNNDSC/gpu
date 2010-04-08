@@ -62,8 +62,7 @@ typedef struct
 ///                        each shortest path search will be written
 /// \param numResults Should be the size of all three passed inarrays
 ///
-void runDijkstra( GraphData* graph, int *sourceVertices, int *endVertices,
-                   float *outResultCosts, int numResults );
+void runDijkstra( GraphData* graph, int *sourceVertices, float *outResultCosts, int numResults );
 
 
 ///
@@ -87,7 +86,26 @@ void runDijkstra( GraphData* graph, int *sourceVertices, int *endVertices,
 /// \param numResults Should be the size of all three passed inarrays
 ///
 ///
-void runDijkstraMultiGPU( GraphData* graph, int *sourceVertices, int *endVertices,
-                          float *outResultCosts, int numResults );
+void runDijkstraMultiGPU( GraphData* graph, int *sourceVertices, float *outResultCosts, int numResults );
+
+///
+/// Run Dijkstra's shortest path on the GraphData provided to this function.  This
+/// function will compute the shortest path distance from sourceVertices[n] ->
+/// endVertices[n] and store the cost in outResultCosts[n].  The number of results
+/// it will compute is given by numResults.
+///
+/// This is a CPU *REFERENCE* implementation for use as a fallback.
+///
+/// \param graph Structure containing the vertex, edge, and weight arra
+///              for the input graph
+/// \param startVertices Indices into the vertex array from which to
+///                      start the search
+/// \param outResultsCosts A pre-allocated array where the results for
+///                        each shortest path search will be written.
+///                        This must be sized numResults * graph->numVertices.
+/// \param numResults Should be the size of all three passed inarrays
+///
+void runDijkstraRef( GraphData* graph, int *sourceVertices,
+                     float *outResultCosts, int numResults );
 
 #endif // DIJKSTRA_KERNEL_H
