@@ -46,4 +46,5 @@ CCFILES		:= oclDijkstra.cpp \
 
 include ../../common/common_opencl.mk
 
-
+# Link against Dijkstra library
+LIB             += -lpthread
