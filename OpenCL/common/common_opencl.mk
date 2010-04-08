@@ -37,18 +37,19 @@
 
 P4_ROOT ?= ${HOME}/perforce/
 
-
-
 # detect OS
 OSUPPER = $(shell uname -s 2>/dev/null | tr [:lower:] [:upper:])
 OSLOWER = $(shell uname -s 2>/dev/null | tr [:upper:] [:lower:])
 # 'linux' is output for Linux system, 'darwin' for OS X
 DARWIN = $(strip $(findstring DARWIN, $(OSUPPER)))
+ifneq ($(DARWIN),)
+   SNOWLEOPARD = $(strip $(findstring 10.6, $(shell egrep "<string>10\.6" /System/Library/CoreServices/SystemVersion.plist)))
+endif
 
 
 # detect if 32 bit or 64 bit system
 HP_64 =	$(shell uname -m | grep 64)
-
+OSARCH= $(shell uname -m)
 
 # Basic directory setup for SDK
 # (override directories only if they are not already defined)
@@ -104,9 +105,48 @@ CWARN_FLAGS := $(CXXWARN_FLAGS) \
 	-Wnested-externs \
 	-Wmain \
 
+
+# architecture flag for nvcc and gcc compilers build
+LIB_ARCH        := $(OSARCH)
+
+# Determining the necessary Cross-Compilation Flags
+# 32-bit OS, but we target 64-bit cross compilation
+ifeq ($(x86_64),1)
+    LIB_ARCH         = x86_64
+
+    ifneq ($(DARWIN),)
+         CXX_ARCH_FLAGS += -arch x86_64
+    else
+         CXX_ARCH_FLAGS += -m64
+    endif
+else
+# 64-bit OS, and we target 32-bit cross compilation
+    ifeq ($(i386),1)
+        LIB_ARCH         = i386
+
+        ifneq ($(DARWIN),)
+             CXX_ARCH_FLAGS += -arch i386
+        else
+             CXX_ARCH_FLAGS += -m32
+        endif
+    else
+        ifneq ($(SNOWLEOPARD),)
+             CXX_ARCH_FLAGS += -m32 -arch i386
+             LIB_ARCH        = i386
+        else
+             ifeq "$(strip $(HP_64))" ""
+                LIB_ARCH        = i386
+             else
+                LIB_ARCH        = x86_64
+             endif
+        endif
+    endif
+endif
+
 # Compiler-specific flags
-CXXFLAGS  := $(CXXWARN_FLAGS)
-CFLAGS    := $(CWARN_FLAGS)
+CXXFLAGS  := $(CXXWARN_FLAGS) $(CXX_ARCH_FLAGS)
+CFLAGS    := $(CWARN_FLAGS) $(CXX_ARCH_FLAGS)
+LINK      += $(CXX_ARCH_FLAGS)
 
 # Common flags
 COMMONFLAGS += $(INCLUDES) -DUNIX
@@ -162,6 +202,7 @@ ifneq ($(DARWIN),)
    LIB += -framework OpenCL -framework OpenGL ${OPENGLLIB} -framework AppKit ${ATF} ${LIB} 
 else
    LIB       := ${USRLIBDIR} -L${OCLLIBDIR} -L$(LIBDIR) -L$(SHAREDDIR)/lib/$(OSLOWER) 
+#   LIB += -L/home/ginsburg/Downloads/ati-stream-sdk-v2.01-lnx64/lib/x86_64/
    LIB += -lOpenCL ${OPENGLLIB} ${LIB} 
 endif
 
@@ -169,14 +210,10 @@ endif
 # Lib/exe configuration
 ifneq ($(STATIC_LIB),)
 	TARGETDIR := $(OCLLIBDIR)
-	TARGET   := $(subst .a,$(LIBSUFFIX).a,$(OCLLIBDIR)/$(STATIC_LIB))
+	TARGET   := $(subst .a,_$(LIB_ARCH)$(LIBSUFFIX).a,$(OCLLIBDIR)/$(STATIC_LIB))
 	LINKLINE  = ar qv $(TARGET) $(OBJS) 
 else
-    ifeq ($(dbg),1)
-	    LIB += -loclUtilD -lshrutilD
-	else
-	    LIB += -loclUtil -lshrutil
-	endif
+	LIB += -loclUtil_$(LIB_ARCH)$(LIBSUFFIX) -lshrutil_$(LIB_ARCH)$(LIBSUFFIX)
 	TARGETDIR := $(BINDIR)/$(BINSUBDIR)
 	TARGET    := $(TARGETDIR)/$(EXECUTABLE)
 	LINKLINE  = $(LINK) -o $(TARGET) $(OBJS) $(LIB)

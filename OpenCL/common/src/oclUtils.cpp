@@ -1,5 +1,5 @@
 /*
- * Copyright 1993-2009 NVIDIA Corporation.  All rights reserved.
+ * Copyright 1993-2010 NVIDIA Corporation.  All rights reserved.
  *
  * NVIDIA Corporation and its licensors retain all intellectual property and 
  * proprietary rights in and to this software and related documentation. 
@@ -14,7 +14,7 @@
  */
 
 // *********************************************************************
-// Utilities for NVIDIA OpenCL SDK 
+// Utilities specific to OpenCL samples in NVIDIA GPU Computing SDK 
 // *********************************************************************
 
 #include "oclUtils.h"
@@ -23,9 +23,6 @@
 #include <iostream>
 #include <algorithm>
 #include <stdarg.h>
-
-// size of PGM file header 
-const unsigned int PGMHeaderSize = 0x40;
 
 //////////////////////////////////////////////////////////////////////////////
 //! Gets the platform ID for NVIDIA if available, otherwise default
@@ -39,39 +36,40 @@ cl_int oclGetPlatformID(cl_platform_id* clSelectedPlatformID)
     cl_uint num_platforms; 
     cl_platform_id* clPlatformIDs;
     cl_int ciErrNum;
+    *clSelectedPlatformID = NULL;
 
     // Get OpenCL platform count
     ciErrNum = clGetPlatformIDs (0, NULL, &num_platforms);
     if (ciErrNum != CL_SUCCESS)
-	{
-        shrLog(LOGBOTH, 0.0, " Error %i in clGetPlatformIDs Call !!!\n\n", ciErrNum);
+    {
+        shrLog(" Error %i in clGetPlatformIDs Call !!!\n\n", ciErrNum);
         return -1000;
     }
     else 
     {
         if(num_platforms == 0)
-	    {
-            shrLog(LOGBOTH, 0.0, "No OpenCL platform found!\n\n");
+        {
+            shrLog("No OpenCL platform found!\n\n");
             return -2000;
         }
         else 
         {
             // if there's a platform or more, make space for ID's
             if ((clPlatformIDs = (cl_platform_id*)malloc(num_platforms * sizeof(cl_platform_id))) == NULL)
-	        {
-		        shrLog(LOGBOTH, 0.0, "Failed to allocate memory for cl_platform ID's!\n\n");
+            {
+                shrLog("Failed to allocate memory for cl_platform ID's!\n\n");
                 return -3000;
-	        }
+            }
 
             // get platform info for each platform and trap the NVIDIA platform if found
             ciErrNum = clGetPlatformIDs (num_platforms, clPlatformIDs, NULL);
             for(cl_uint i = 0; i < num_platforms; ++i)
-	        {
+            {
                 ciErrNum = clGetPlatformInfo (clPlatformIDs[i], CL_PLATFORM_NAME, 1024, &chBuffer, NULL);
                 if(ciErrNum == CL_SUCCESS)
                 {
-                    if(strcmp("NVIDIA", chBuffer) == 0)
-		            {
+                    if(strstr(chBuffer, "NVIDIA") != NULL)
+                    {
                         *clSelectedPlatformID = clPlatformIDs[i];
                         break;
                     }
@@ -79,9 +77,9 @@ cl_int oclGetPlatformID(cl_platform_id* clSelectedPlatformID)
             }
 
             // default to zeroeth platform if NVIDIA not found
-            if(clSelectedPlatformID == NULL)
-	        {
-                shrLog(LOGBOTH, 0.0, "WARNING: NVIDIA OpenCL platform not found - defaulting to first platform!\n\n");
+            if(*clSelectedPlatformID == NULL)
+            {
+                shrLog("WARNING: NVIDIA OpenCL platform not found - defaulting to first platform!\n\n");
                 *clSelectedPlatformID = clPlatformIDs[0];
             }
 
@@ -89,7 +87,7 @@ cl_int oclGetPlatformID(cl_platform_id* clSelectedPlatformID)
         }
     }
 
-	return CL_SUCCESS;
+    return CL_SUCCESS;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -102,7 +100,7 @@ void oclPrintDevName(int iLogMode, cl_device_id device)
 {
     char device_string[1024];
     clGetDeviceInfo(device, CL_DEVICE_NAME, sizeof(device_string), &device_string, NULL);
-    shrLog(iLogMode, 0.0, " Device %s\n", device_string);
+    shrLogEx(iLogMode, 0, " Device %s\n", device_string);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -116,193 +114,211 @@ void oclPrintDevInfo(int iLogMode, cl_device_id device)
     char device_string[1024];
     bool nv_device_attibute_query = false;
 
-    // CL_DEVICE_VENDOR
-    clGetDeviceInfo(device, CL_DEVICE_VENDOR, sizeof(device_string), &device_string, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_VENDOR: \t\t\t%s\n", device_string);
-
     // CL_DEVICE_NAME
     clGetDeviceInfo(device, CL_DEVICE_NAME, sizeof(device_string), &device_string, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_NAME: \t\t\t%s\n", device_string);
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_NAME: \t\t\t%s\n", device_string);
+
+    // CL_DEVICE_VENDOR
+    clGetDeviceInfo(device, CL_DEVICE_VENDOR, sizeof(device_string), &device_string, NULL);
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_VENDOR: \t\t\t%s\n", device_string);
  
     // CL_DRIVER_VERSION
     clGetDeviceInfo(device, CL_DRIVER_VERSION, sizeof(device_string), &device_string, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DRIVER_VERSION: \t\t\t%s\n", device_string);
+    shrLogEx(iLogMode, 0, "  CL_DRIVER_VERSION: \t\t\t%s\n", device_string);
 
     // CL_DEVICE_INFO
     cl_device_type type;
     clGetDeviceInfo(device, CL_DEVICE_TYPE, sizeof(type), &type, NULL);
     if( type & CL_DEVICE_TYPE_CPU )
-        shrLog(iLogMode, 0.0, "  CL_DEVICE_TYPE:\t\t\t%s\n", "CL_DEVICE_TYPE_CPU");
+        shrLogEx(iLogMode, 0, "  CL_DEVICE_TYPE:\t\t\t%s\n", "CL_DEVICE_TYPE_CPU");
     if( type & CL_DEVICE_TYPE_GPU )
-        shrLog(iLogMode, 0.0, "  CL_DEVICE_TYPE:\t\t\t%s\n", "CL_DEVICE_TYPE_GPU");
+        shrLogEx(iLogMode, 0, "  CL_DEVICE_TYPE:\t\t\t%s\n", "CL_DEVICE_TYPE_GPU");
     if( type & CL_DEVICE_TYPE_ACCELERATOR )
-        shrLog(iLogMode, 0.0, "  CL_DEVICE_TYPE:\t\t\t%s\n", "CL_DEVICE_TYPE_ACCELERATOR");
+        shrLogEx(iLogMode, 0, "  CL_DEVICE_TYPE:\t\t\t%s\n", "CL_DEVICE_TYPE_ACCELERATOR");
     if( type & CL_DEVICE_TYPE_DEFAULT )
-        shrLog(iLogMode, 0.0, "  CL_DEVICE_TYPE:\t\t\t%s\n", "CL_DEVICE_TYPE_DEFAULT");
+        shrLogEx(iLogMode, 0, "  CL_DEVICE_TYPE:\t\t\t%s\n", "CL_DEVICE_TYPE_DEFAULT");
     
     // CL_DEVICE_MAX_COMPUTE_UNITS
     cl_uint compute_units;
     clGetDeviceInfo(device, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(compute_units), &compute_units, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_MAX_COMPUTE_UNITS:\t\t%d\n", compute_units);
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_MAX_COMPUTE_UNITS:\t\t%u\n", compute_units);
 
-    // CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS
-    cl_uint max_dims;
-    clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, sizeof(max_dims), &max_dims, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS:\t%d\n", max_dims);
+	// CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS
+    size_t workitem_dims;
+    clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, sizeof(workitem_dims), &workitem_dims, NULL);
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS:\t%u\n", workitem_dims);
 
     // CL_DEVICE_MAX_WORK_ITEM_SIZES
     size_t workitem_size[3];
     clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_SIZES, sizeof(workitem_size), &workitem_size, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_MAX_WORK_ITEM_SIZES:\t%d / %d / %d \n", workitem_size[0], workitem_size[1], workitem_size[2]);
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_MAX_WORK_ITEM_SIZES:\t%u / %u / %u \n", workitem_size[0], workitem_size[1], workitem_size[2]);
     
     // CL_DEVICE_MAX_WORK_GROUP_SIZE
     size_t workgroup_size;
     clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(workgroup_size), &workgroup_size, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_MAX_WORK_GROUP_SIZE:\t%d\n", workgroup_size);
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_MAX_WORK_GROUP_SIZE:\t%u\n", workgroup_size);
 
     // CL_DEVICE_MAX_CLOCK_FREQUENCY
     cl_uint clock_frequency;
     clGetDeviceInfo(device, CL_DEVICE_MAX_CLOCK_FREQUENCY, sizeof(clock_frequency), &clock_frequency, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_MAX_CLOCK_FREQUENCY:\t%u MHz\n", clock_frequency);
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_MAX_CLOCK_FREQUENCY:\t%u MHz\n", clock_frequency);
 
     // CL_DEVICE_ADDRESS_BITS
     cl_uint addr_bits;
     clGetDeviceInfo(device, CL_DEVICE_ADDRESS_BITS, sizeof(addr_bits), &addr_bits, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_ADDRESS_BITS:\t\t%d\n", addr_bits);
-
-    // CL_DEVICE_IMAGE_SUPPORT
-    cl_bool image_support;
-    clGetDeviceInfo(device, CL_DEVICE_IMAGE_SUPPORT, sizeof(image_support), &image_support, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_IMAGE_SUPPORT:\t\t%d\n", image_support);
-
-    // CL_DEVICE_MAX_READ_IMAGE_ARGS
-    cl_uint max_read_image_args;
-    clGetDeviceInfo(device, CL_DEVICE_MAX_READ_IMAGE_ARGS, sizeof(max_read_image_args), &max_read_image_args, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_MAX_READ_IMAGE_ARGS:\t%d\n", max_read_image_args);
-
-    // CL_DEVICE_MAX_WRITE_IMAGE_ARGS
-    cl_uint max_write_image_args;
-    clGetDeviceInfo(device, CL_DEVICE_MAX_WRITE_IMAGE_ARGS, sizeof(max_write_image_args), &max_write_image_args, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_MAX_WRITE_IMAGE_ARGS:\t%d\n", max_write_image_args);
-    
-    // CL_DEVICE_IMAGE2D_MAX_WIDTH
-    size_t image2d_max_width;
-    clGetDeviceInfo(device, CL_DEVICE_IMAGE2D_MAX_WIDTH, sizeof(image2d_max_width), &image2d_max_width, NULL);
-    size_t image2d_max_height;
-    clGetDeviceInfo(device, CL_DEVICE_IMAGE2D_MAX_HEIGHT, sizeof(image2d_max_height), &image2d_max_height, NULL);
-    size_t image3d_max_width;
-    clGetDeviceInfo(device, CL_DEVICE_IMAGE3D_MAX_WIDTH, sizeof(image3d_max_width), &image3d_max_width, NULL);
-    size_t image3d_max_height;
-    clGetDeviceInfo(device, CL_DEVICE_IMAGE3D_MAX_HEIGHT, sizeof(image3d_max_height), &image3d_max_height, NULL);
-    size_t image3d_max_depth;
-    clGetDeviceInfo(device, CL_DEVICE_IMAGE3D_MAX_DEPTH, sizeof(image3d_max_depth), &image3d_max_depth, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_IMAGE_MAX_WIDTH:\t\t2d width %d, 2d height %d, 3d width %d, 3d height %d, 3d depth %d\n", image2d_max_width, image2d_max_height, image3d_max_width, image3d_max_height, image3d_max_depth);
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_ADDRESS_BITS:\t\t%u\n", addr_bits);
 
     // CL_DEVICE_MAX_MEM_ALLOC_SIZE
     cl_ulong max_mem_alloc_size;
     clGetDeviceInfo(device, CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(max_mem_alloc_size), &max_mem_alloc_size, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_MAX_MEM_ALLOC_SIZE:\t\t%d MByte\n", (unsigned int)(max_mem_alloc_size / (1024 * 1024)));
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_MAX_MEM_ALLOC_SIZE:\t\t%u MByte\n", (unsigned int)(max_mem_alloc_size / (1024 * 1024)));
 
     // CL_DEVICE_GLOBAL_MEM_SIZE
     cl_ulong mem_size;
     clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(mem_size), &mem_size, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_GLOBAL_MEM_SIZE:\t\t%d MByte\n", (unsigned int)(mem_size / (1024 * 1024)));
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_GLOBAL_MEM_SIZE:\t\t%u MByte\n", (unsigned int)(mem_size / (1024 * 1024)));
 
     // CL_DEVICE_ERROR_CORRECTION_SUPPORT
     cl_bool error_correction_support;
     clGetDeviceInfo(device, CL_DEVICE_ERROR_CORRECTION_SUPPORT, sizeof(error_correction_support), &error_correction_support, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_ERROR_CORRECTION_SUPPORT:\t%s\n", error_correction_support == CL_TRUE ? "yes" : "no");
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_ERROR_CORRECTION_SUPPORT:\t%s\n", error_correction_support == CL_TRUE ? "yes" : "no");
 
     // CL_DEVICE_LOCAL_MEM_TYPE
     cl_device_local_mem_type local_mem_type;
     clGetDeviceInfo(device, CL_DEVICE_LOCAL_MEM_TYPE, sizeof(local_mem_type), &local_mem_type, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_LOCAL_MEM_TYPE:\t\t%s\n", local_mem_type == 1 ? "local" : "global");
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_LOCAL_MEM_TYPE:\t\t%s\n", local_mem_type == 1 ? "local" : "global");
 
     // CL_DEVICE_LOCAL_MEM_SIZE
     clGetDeviceInfo(device, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(mem_size), &mem_size, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_LOCAL_MEM_SIZE:\t\t%d KByte\n", (unsigned int)(mem_size / 1024));
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_LOCAL_MEM_SIZE:\t\t%u KByte\n", (unsigned int)(mem_size / 1024));
 
     // CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE
     clGetDeviceInfo(device, CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE, sizeof(mem_size), &mem_size, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE:\t%d KByte\n", (unsigned int)(mem_size / 1024));
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE:\t%u KByte\n", (unsigned int)(mem_size / 1024));
 
     // CL_DEVICE_QUEUE_PROPERTIES
     cl_command_queue_properties queue_properties;
     clGetDeviceInfo(device, CL_DEVICE_QUEUE_PROPERTIES, sizeof(queue_properties), &queue_properties, NULL);
     if( queue_properties & CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE )
-        shrLog(iLogMode, 0.0, "  CL_DEVICE_QUEUE_PROPERTIES:\t\t%s\n", "CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE");    
+        shrLogEx(iLogMode, 0, "  CL_DEVICE_QUEUE_PROPERTIES:\t\t%s\n", "CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE");    
     if( queue_properties & CL_QUEUE_PROFILING_ENABLE )
-        shrLog(iLogMode, 0.0, "  CL_DEVICE_QUEUE_PROPERTIES:\t\t%s\n", "CL_QUEUE_PROFILING_ENABLE");
+        shrLogEx(iLogMode, 0, "  CL_DEVICE_QUEUE_PROPERTIES:\t\t%s\n", "CL_QUEUE_PROFILING_ENABLE");
+
+    // CL_DEVICE_IMAGE_SUPPORT
+    cl_bool image_support;
+    clGetDeviceInfo(device, CL_DEVICE_IMAGE_SUPPORT, sizeof(image_support), &image_support, NULL);
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_IMAGE_SUPPORT:\t\t%u\n", image_support);
+
+    // CL_DEVICE_MAX_READ_IMAGE_ARGS
+    cl_uint max_read_image_args;
+    clGetDeviceInfo(device, CL_DEVICE_MAX_READ_IMAGE_ARGS, sizeof(max_read_image_args), &max_read_image_args, NULL);
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_MAX_READ_IMAGE_ARGS:\t%u\n", max_read_image_args);
+
+    // CL_DEVICE_MAX_WRITE_IMAGE_ARGS
+    cl_uint max_write_image_args;
+    clGetDeviceInfo(device, CL_DEVICE_MAX_WRITE_IMAGE_ARGS, sizeof(max_write_image_args), &max_write_image_args, NULL);
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_MAX_WRITE_IMAGE_ARGS:\t%u\n", max_write_image_args);
+
+    // CL_DEVICE_SINGLE_FP_CONFIG
+    cl_device_fp_config fp_config;
+    clGetDeviceInfo(device, CL_DEVICE_SINGLE_FP_CONFIG, sizeof(cl_device_fp_config), &fp_config, NULL);
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_SINGLE_FP_CONFIG:\t\t%s%s%s%s%s%s\n",
+        fp_config & CL_FP_DENORM ? "denorms " : "",
+        fp_config & CL_FP_INF_NAN ? "INF-quietNaNs " : "",
+        fp_config & CL_FP_ROUND_TO_NEAREST ? "round-to-nearest " : "",
+        fp_config & CL_FP_ROUND_TO_ZERO ? "round-to-zero " : "",
+        fp_config & CL_FP_ROUND_TO_INF ? "round-to-inf " : "",
+        fp_config & CL_FP_FMA ? "fma " : "");
     
+    // CL_DEVICE_IMAGE2D_MAX_WIDTH, CL_DEVICE_IMAGE2D_MAX_HEIGHT, CL_DEVICE_IMAGE3D_MAX_WIDTH, CL_DEVICE_IMAGE3D_MAX_HEIGHT, CL_DEVICE_IMAGE3D_MAX_DEPTH
+    size_t szMaxDims[5];
+    shrLogEx(iLogMode, 0, "\n  CL_DEVICE_IMAGE <dim>"); 
+    clGetDeviceInfo(device, CL_DEVICE_IMAGE2D_MAX_WIDTH, sizeof(size_t), &szMaxDims[0], NULL);
+    shrLogEx(iLogMode, 0, "\t\t\t2D_MAX_WIDTH\t %u\n", szMaxDims[0]);
+    clGetDeviceInfo(device, CL_DEVICE_IMAGE2D_MAX_HEIGHT, sizeof(size_t), &szMaxDims[1], NULL);
+    shrLogEx(iLogMode, 0, "\t\t\t\t\t2D_MAX_HEIGHT\t %u\n", szMaxDims[1]);
+    clGetDeviceInfo(device, CL_DEVICE_IMAGE3D_MAX_WIDTH, sizeof(size_t), &szMaxDims[2], NULL);
+    shrLogEx(iLogMode, 0, "\t\t\t\t\t3D_MAX_WIDTH\t %u\n", szMaxDims[2]);
+    clGetDeviceInfo(device, CL_DEVICE_IMAGE3D_MAX_HEIGHT, sizeof(size_t), &szMaxDims[3], NULL);
+    shrLogEx(iLogMode, 0, "\t\t\t\t\t3D_MAX_HEIGHT\t %u\n", szMaxDims[3]);
+    clGetDeviceInfo(device, CL_DEVICE_IMAGE3D_MAX_DEPTH, sizeof(size_t), &szMaxDims[4], NULL);
+    shrLogEx(iLogMode, 0, "\t\t\t\t\t3D_MAX_DEPTH\t %u\n", szMaxDims[4]);
+
     // CL_DEVICE_EXTENSIONS: get device extensions, and if any then parse & log the string onto separate lines
     clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, sizeof(device_string), &device_string, NULL);
     if (device_string != 0) 
     {
-        shrLog(iLogMode, 0.0, "  CL_DEVICE_EXTENSIONS:\n");
+        shrLogEx(iLogMode, 0, "\n  CL_DEVICE_EXTENSIONS:");
         std::string stdDevString;
         stdDevString = std::string(device_string);
         size_t szOldPos = 0;
         size_t szSpacePos = stdDevString.find(' ', szOldPos); // extensions string is space delimited
-        while (szSpacePos != stdDevString.npos && (szSpacePos - szOldPos) > 0)
+        while (szSpacePos != stdDevString.npos)
         {
             if( strcmp("cl_nv_device_attribute_query", stdDevString.substr(szOldPos, szSpacePos - szOldPos).c_str()) == 0 )
                 nv_device_attibute_query = true;
 
-            shrLog(iLogMode, 0.0, "\t\t\t\t\t%s\n", stdDevString.substr(szOldPos, szSpacePos - szOldPos).c_str());
+            if (szOldPos > 0)
+            {
+                shrLogEx(iLogMode, 0, "\t\t");
+            }
+            shrLogEx(iLogMode, 0, "\t\t\t%s\n", stdDevString.substr(szOldPos, szSpacePos - szOldPos).c_str());
             
-            szOldPos = szSpacePos + 1;
-            szSpacePos = stdDevString.find(' ', szOldPos); 
+            do {
+                szOldPos = szSpacePos + 1;
+                szSpacePos = stdDevString.find(' ', szOldPos);
+            } while (szSpacePos == szOldPos);
         }
+        shrLogEx(iLogMode, 0, "\n");
     }
     else 
     {
-        shrLog(iLogMode, 0.0, "  CL_DEVICE_EXTENSIONS: None\n");
+        shrLogEx(iLogMode, 0, "  CL_DEVICE_EXTENSIONS: None\n");
     }
 
-    if( nv_device_attibute_query ) {
+#if 0 //@TEMP
+    if(nv_device_attibute_query) 
+    {
         cl_uint compute_capability_major, compute_capability_minor;
-        clGetDeviceInfo(device, CL_NV_DEVICE_COMPUTE_CAPABILITY_MAJOR, sizeof(cl_uint), &compute_capability_major, NULL);
-        clGetDeviceInfo(device, CL_NV_DEVICE_COMPUTE_CAPABILITY_MINOR, sizeof(cl_uint), &compute_capability_minor, NULL);
+        clGetDeviceInfo(device, CL_DEVICE_COMPUTE_CAPABILITY_MAJOR_NV, sizeof(cl_uint), &compute_capability_major, NULL);
+        clGetDeviceInfo(device, CL_DEVICE_COMPUTE_CAPABILITY_MINOR_NV, sizeof(cl_uint), &compute_capability_minor, NULL);
+        shrLogEx(iLogMode, 0, "\n  CL_DEVICE_COMPUTE_CAPABILITY_NV:\t%u.%u\n", compute_capability_major, compute_capability_minor);        
 
-        shrLog(iLogMode, 0.0, "  CL_NV_DEVICE_COMPUTE_CAPABILITY:\t%u.%u\n", compute_capability_major, compute_capability_minor);        
+        shrLogEx(iLogMode, 0, "  NUMBER OF MULTIPROCESSORS:\t\t%u\n", compute_units); // this is the same value reported by CL_DEVICE_MAX_COMPUTE_UNITS
+        shrLogEx(iLogMode, 0, "  NUMBER OF CUDA CORES:\t\t\t%u\n", nGpuArchCoresPerSM[compute_capability_major] * compute_units);
 
         cl_uint regs_per_block;
-        clGetDeviceInfo(device, CL_NV_DEVICE_REGISTERS_PER_BLOCK, sizeof(cl_uint), &regs_per_block, NULL);
-        shrLog(iLogMode, 0.0, "  CL_NV_DEVICE_REGISTERS_PER_BLOCK:\t%u\n", regs_per_block);        
+        clGetDeviceInfo(device, CL_DEVICE_REGISTERS_PER_BLOCK_NV, sizeof(cl_uint), &regs_per_block, NULL);
+        shrLogEx(iLogMode, 0, "  CL_DEVICE_REGISTERS_PER_BLOCK_NV:\t%u\n", regs_per_block);        
 
         cl_uint warp_size;
-        clGetDeviceInfo(device, CL_NV_DEVICE_WARP_SIZE, sizeof(cl_uint), &warp_size, NULL);
-        shrLog(iLogMode, 0.0, "  CL_NV_DEVICE_WARP_SIZE:\t\t%u\n", warp_size);        
+        clGetDeviceInfo(device, CL_DEVICE_WARP_SIZE_NV, sizeof(cl_uint), &warp_size, NULL);
+        shrLogEx(iLogMode, 0, "  CL_DEVICE_WARP_SIZE_NV:\t\t%u\n", warp_size);        
 
         cl_bool gpu_overlap;
-        clGetDeviceInfo(device, CL_NV_DEVICE_GPU_OVERLAP, sizeof(cl_bool), &gpu_overlap, NULL);
-        shrLog(iLogMode, 0.0, "  CL_NV_DEVICE_GPU_OVERLAP:\t\t%s\n", gpu_overlap == CL_TRUE ? "CL_TRUE" : "CL_FALSE");        
+        clGetDeviceInfo(device, CL_DEVICE_GPU_OVERLAP_NV, sizeof(cl_bool), &gpu_overlap, NULL);
+        shrLogEx(iLogMode, 0, "  CL_DEVICE_GPU_OVERLAP_NV:\t\t%s\n", gpu_overlap == CL_TRUE ? "CL_TRUE" : "CL_FALSE");        
 
         cl_bool exec_timeout;
-        clGetDeviceInfo(device, CL_NV_DEVICE_KERNEL_EXEC_TIMEOUT, sizeof(cl_bool), &exec_timeout, NULL);
-        shrLog(iLogMode, 0.0, "  CL_NV_DEVICE_KERNEL_EXEC_TIMEOUT:\t%s\n", exec_timeout == CL_TRUE ? "CL_TRUE" : "CL_FALSE");        
+        clGetDeviceInfo(device, CL_DEVICE_KERNEL_EXEC_TIMEOUT_NV, sizeof(cl_bool), &exec_timeout, NULL);
+        shrLogEx(iLogMode, 0, "  CL_DEVICE_KERNEL_EXEC_TIMEOUT_NV:\t%s\n", exec_timeout == CL_TRUE ? "CL_TRUE" : "CL_FALSE");        
 
         cl_bool integrated_memory;
-        clGetDeviceInfo(device, CL_NV_DEVICE_INTEGRATED_MEMORY, sizeof(cl_bool), &integrated_memory, NULL);
-        shrLog(iLogMode, 0.0, "  CL_NV_DEVICE_INTEGRATED_MEMORY:\t%s\n", integrated_memory == CL_TRUE ? "CL_TRUE" : "CL_FALSE");        
+        clGetDeviceInfo(device, CL_DEVICE_INTEGRATED_MEMORY_NV, sizeof(cl_bool), &integrated_memory, NULL);
+        shrLogEx(iLogMode, 0, "  CL_DEVICE_INTEGRATED_MEMORY_NV:\t%s\n", integrated_memory == CL_TRUE ? "CL_TRUE" : "CL_FALSE");        
     }
-
-    // CL_DEVICE_PREFERRED_VECTOR_WIDTH_CHAR
-    cl_uint vec_width_char;
-    clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_CHAR, sizeof(vec_width_char), &vec_width_char, NULL);
-    cl_uint vec_width_short;
-    clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_SHORT, sizeof(vec_width_short), &vec_width_short, NULL);
-    cl_uint vec_width_int;
-    clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_INT, sizeof(vec_width_int), &vec_width_int, NULL);
-    cl_uint vec_width_long;
-    clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_LONG, sizeof(vec_width_long), &vec_width_long, NULL);
-    cl_uint vec_width_float;
-    clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_FLOAT, sizeof(vec_width_float), &vec_width_float, NULL);
-    cl_uint vec_width_double;
-    clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE, sizeof(vec_width_double), &vec_width_double, NULL);
-    shrLog(iLogMode, 0.0, "  CL_DEVICE_PREFERRED_VECTOR_WIDTH:\tchar %d, short %d, int %d, long %d, float %d, double %d\n", vec_width_char, vec_width_short, vec_width_int, vec_width_long, vec_width_float, vec_width_double);
-
-    shrLog(iLogMode, 0.0, "\n");
+#endif
+    // CL_DEVICE_PREFERRED_VECTOR_WIDTH_<type>
+    shrLogEx(iLogMode, 0, "  CL_DEVICE_PREFERRED_VECTOR_WIDTH_<t>\t"); 
+    cl_uint vec_width [6];
+    clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_CHAR, sizeof(cl_uint), &vec_width[0], NULL);
+    clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_SHORT, sizeof(cl_uint), &vec_width[1], NULL);
+    clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_INT, sizeof(cl_uint), &vec_width[2], NULL);
+    clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_LONG, sizeof(cl_uint), &vec_width[3], NULL);
+    clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_FLOAT, sizeof(cl_uint), &vec_width[4], NULL);
+    clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE, sizeof(cl_uint), &vec_width[5], NULL);
+    shrLogEx(iLogMode, 0, "CHAR %u, SHORT %u, INT %u, LONG %u, FLOAT %u, DOUBLE %u\n\n\n", 
+           vec_width[0], vec_width[1], vec_width[2], vec_width[3], vec_width[4], vec_width[5]); 
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -347,10 +363,10 @@ cl_device_id oclGetMaxFlopsDev(cl_context cxGPUContext)
     clGetContextInfo(cxGPUContext, CL_CONTEXT_DEVICES, szParmDataBytes, cdDevices, NULL);
 
     cl_device_id max_flops_device = cdDevices[0];
-	int max_flops = 0;
-	
-	size_t current_device = 0;
-	
+    int max_flops = 0;
+    
+    size_t current_device = 0;
+    
     // CL_DEVICE_MAX_COMPUTE_UNITS
     cl_uint compute_units;
     clGetDeviceInfo(cdDevices[current_device], CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(compute_units), &compute_units, NULL);
@@ -359,11 +375,11 @@ cl_device_id oclGetMaxFlopsDev(cl_context cxGPUContext)
     cl_uint clock_frequency;
     clGetDeviceInfo(cdDevices[current_device], CL_DEVICE_MAX_CLOCK_FREQUENCY, sizeof(clock_frequency), &clock_frequency, NULL);
     
-	max_flops = compute_units * clock_frequency;
-	++current_device;
+    max_flops = compute_units * clock_frequency;
+    ++current_device;
 
-	while( current_device < device_count )
-	{
+    while( current_device < device_count )
+    {
         // CL_DEVICE_MAX_COMPUTE_UNITS
         cl_uint compute_units;
         clGetDeviceInfo(cdDevices[current_device], CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(compute_units), &compute_units, NULL);
@@ -371,19 +387,19 @@ cl_device_id oclGetMaxFlopsDev(cl_context cxGPUContext)
         // CL_DEVICE_MAX_CLOCK_FREQUENCY
         cl_uint clock_frequency;
         clGetDeviceInfo(cdDevices[current_device], CL_DEVICE_MAX_CLOCK_FREQUENCY, sizeof(clock_frequency), &clock_frequency, NULL);
-		
+        
         int flops = compute_units * clock_frequency;
-		if( flops > max_flops )
-		{
-			max_flops        = flops;
-			max_flops_device = cdDevices[current_device];
-		}
-		++current_device;
-	}
+        if( flops > max_flops )
+        {
+            max_flops        = flops;
+            max_flops_device = cdDevices[current_device];
+        }
+        ++current_device;
+    }
 
     free(cdDevices);
 
-	return max_flops_device;
+    return max_flops_device;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -563,7 +579,7 @@ void oclLogPtx(cl_program cpProgram, cl_device_id cdDevice, const char* cPtxFile
         // if a separate filename is supplied, dump ptx there 
         if (NULL != cPtxFileName)
         {
-            shrLog(LOGBOTH, 0.0, "\nWriting ptx to separate file: %s ...\n\n", cPtxFileName);
+            shrLog("\nWriting ptx to separate file: %s ...\n\n", cPtxFileName);
             FILE* pFileStream = NULL;
             #ifdef _WIN32
                 fopen_s(&pFileStream, cPtxFileName, "wb");
@@ -576,7 +592,7 @@ void oclLogPtx(cl_program cpProgram, cl_device_id cdDevice, const char* cPtxFile
         }
         else // log to logfile and console if no ptx file specified
         {
-           shrLog(LOGBOTH, 0.0, "\n%s\nProgram Binary:\n%s\n%s\n", HDASHLINE, ptx_code[idx], HDASHLINE);
+           shrLog("\n%s\nProgram Binary:\n%s\n%s\n", HDASHLINE, ptx_code[idx], HDASHLINE);
         }
     }
 
@@ -602,7 +618,7 @@ void oclLogBuildInfo(cl_program cpProgram, cl_device_id cdDevice)
     char cBuildLog[10240];
     clGetProgramBuildInfo(cpProgram, cdDevice, CL_PROGRAM_BUILD_LOG, 
                           sizeof(cBuildLog), cBuildLog, NULL );
-    shrLog(LOGBOTH, 0.0, "\n%s\nBuild Log:\n%s\n%s\n", HDASHLINE, cBuildLog, HDASHLINE);
+    shrLog("\n%s\nBuild Log:\n%s\n%s\n", HDASHLINE, cBuildLog, HDASHLINE);
 }
 
 // Helper function for De-allocating cl objects
@@ -615,3 +631,81 @@ void oclDeleteMemObjs(cl_mem* cmMemObjs, int iNumObjs)
         if (cmMemObjs[i])clReleaseMemObject(cmMemObjs[i]);
     }
 }  
+
+// Helper function to get error string
+// *********************************************************************
+const char* oclErrorString(cl_int error)
+{
+    static const char* errorString[] = {
+        "CL_SUCCESS",
+        "CL_DEVICE_NOT_FOUND",
+        "CL_DEVICE_NOT_AVAILABLE",
+        "CL_COMPILER_NOT_AVAILABLE",
+        "CL_MEM_OBJECT_ALLOCATION_FAILURE",
+        "CL_OUT_OF_RESOURCES",
+        "CL_OUT_OF_HOST_MEMORY",
+        "CL_PROFILING_INFO_NOT_AVAILABLE",
+        "CL_MEM_COPY_OVERLAP",
+        "CL_IMAGE_FORMAT_MISMATCH",
+        "CL_IMAGE_FORMAT_NOT_SUPPORTED",
+        "CL_BUILD_PROGRAM_FAILURE",
+        "CL_MAP_FAILURE",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "CL_INVALID_VALUE",
+        "CL_INVALID_DEVICE_TYPE",
+        "CL_INVALID_PLATFORM",
+        "CL_INVALID_DEVICE",
+        "CL_INVALID_CONTEXT",
+        "CL_INVALID_QUEUE_PROPERTIES",
+        "CL_INVALID_COMMAND_QUEUE",
+        "CL_INVALID_HOST_PTR",
+        "CL_INVALID_MEM_OBJECT",
+        "CL_INVALID_IMAGE_FORMAT_DESCRIPTOR",
+        "CL_INVALID_IMAGE_SIZE",
+        "CL_INVALID_SAMPLER",
+        "CL_INVALID_BINARY",
+        "CL_INVALID_BUILD_OPTIONS",
+        "CL_INVALID_PROGRAM",
+        "CL_INVALID_PROGRAM_EXECUTABLE",
+        "CL_INVALID_KERNEL_NAME",
+        "CL_INVALID_KERNEL_DEFINITION",
+        "CL_INVALID_KERNEL",
+        "CL_INVALID_ARG_INDEX",
+        "CL_INVALID_ARG_VALUE",
+        "CL_INVALID_ARG_SIZE",
+        "CL_INVALID_KERNEL_ARGS",
+        "CL_INVALID_WORK_DIMENSION",
+        "CL_INVALID_WORK_GROUP_SIZE",
+        "CL_INVALID_WORK_ITEM_SIZE",
+        "CL_INVALID_GLOBAL_OFFSET",
+        "CL_INVALID_EVENT_WAIT_LIST",
+        "CL_INVALID_EVENT",
+        "CL_INVALID_OPERATION",
+        "CL_INVALID_GL_OBJECT",
+        "CL_INVALID_BUFFER_SIZE",
+        "CL_INVALID_MIP_LEVEL",
+        "CL_INVALID_GLOBAL_WORK_SIZE",
+    };
+
+    const int errorCount = sizeof(errorString) / sizeof(errorString[0]);
+
+    const int index = -error;
+
+    return (index >= 0 && index < errorCount) ? errorString[index] : "";
+}
