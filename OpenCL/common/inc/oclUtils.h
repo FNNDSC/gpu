@@ -1,5 +1,5 @@
 /*
- * Copyright 1993-2009 NVIDIA Corporation.  All rights reserved.
+ * Copyright 1993-2010 NVIDIA Corporation.  All rights reserved.
  *
  * NVIDIA Corporation and its licensors retain all intellectual property and 
  * proprietary rights in and to this software and related documentation. 
@@ -16,28 +16,38 @@
 #ifndef OCL_UTILS_H
 #define OCL_UTILS_H
 
+// *********************************************************************
+// Utilities specific to OpenCL samples in NVIDIA GPU Computing SDK 
+// *********************************************************************
+
 // Common headers:  Cross-API utililties and OpenCL header
 #include <shrUtils.h>
-#include <CL/cl.h>
-#include <CL/clext.h>
 
-// reminders for output window and build log
+// All OpenCL headers
+#if defined (__APPLE__) || defined(MACOSX)
+    #include <OpenCL/opencl.h>
+#else
+    #include <CL/opencl.h>
+#endif 
+
+// reminders for build output window and log
 #ifdef _WIN32
     #pragma message ("Note: including shrUtils.h")
-    #pragma message ("Note: including cl.h")
+    #pragma message ("Note: including opencl.h")
 #endif
 
-// SDK Version 
-#define oclSDKVERSION "1.2.0.16"  // 20090904
+// SDK Revision #
+#define OCL_SDKREVISION "5537818"
 
-// Short version of shrCheckErrorEX(), specific to OpenCL error checking
-// Checks input code against CL_SUCCESS and performs error handling if no match.  
-// Note:  Use shrCheckError() if input AND reference need to be specified as args 
+// Error and Exit Handling Macros... 
 // *********************************************************************
-#define oclCheckError(ciErrNum) shrCheckError(ciErrNum, CL_SUCCESS) 
+// Full error handling macro with Cleanup() callback (if supplied)... 
+// (Companion Inline Function lower on page)
+#define oclCheckErrorEX(a, b, c) __oclCheckErrorEX(a, b, c, __FILE__ , __LINE__) 
 
-// Un-comment the following #define to enable profiling code in SDK apps
-//#define GPU_PROFILING
+// Short version without Cleanup() callback pointer
+// Both Input (a) and Reference (b) are specified as args
+#define oclCheckError(a, b) oclCheckErrorEX(a, b, 0) 
 
 //////////////////////////////////////////////////////////////////////////////
 //! Gets the platform ID for NVIDIA if available, otherwise default to platform 0
@@ -129,4 +139,27 @@ extern "C" void oclLogBuildInfo(cl_program cpProgram, cl_device_id cdDevice);
 // *********************************************************************
 extern "C" void oclDeleteMemObjs(cl_mem* cmMemObjs, int iNumObjs);
 
+// Helper function to get error string
+// *********************************************************************
+extern "C" const char* oclErrorString(cl_int error);
+
+// companion inline function for error checking and exit on error WITH Cleanup Callback (if supplied)
+// *********************************************************************
+inline void __oclCheckErrorEX(cl_int iSample, cl_int iReference, void (*pCleanup)(int), const char* cFile, const int iLine)
+{
+    if (iReference != iSample)
+    {
+        shrLog("\n !!! Error # %i (%s) at line %i , in file %s !!!\n\n", iSample, oclErrorString(iSample), iLine, cFile); 
+        if (pCleanup != NULL)
+        {
+            pCleanup(EXIT_FAILURE);
+        }
+        else 
+        {
+            shrLogEx(LOGBOTH | CLOSELOG, 0, "Exiting...\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+}
 #endif
+
