@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright 1993-2009 NVIDIA Corporation.  All rights reserved.
+# Copyright 1993-2010 NVIDIA Corporation.  All rights reserved.
 #
 # NVIDIA Corporation and its licensors retain all intellectual property and 
 # proprietary rights in and to this software and related documentation. 
@@ -21,7 +21,7 @@
 .SUFFIXES : .cu .cu_dbg.o .c_dbg.o .cpp_dbg.o .cu_rel.o .c_rel.o .cpp_rel.o .cubin .ptx
 
 # Add new SM Versions here as devices with new Compute Capability are released
-SM_VERSIONS := sm_10 sm_11 sm_12 sm_13
+SM_VERSIONS   := 10 11 12 13 20
 
 CUDA_INSTALL_PATH ?= /usr/local/cuda
 
@@ -36,7 +36,7 @@ OSLOWER = $(shell uname -s 2>/dev/null | tr [:upper:] [:lower:])
 # 'linux' is output for Linux system, 'darwin' for OS X
 DARWIN = $(strip $(findstring DARWIN, $(OSUPPER)))
 ifneq ($(DARWIN),)
-   SNOWLEOPARD = $(strip $(findstring 10.6, $(shell egrep "<string>10\.6</string>" /System/Library/CoreServices/SystemVersion.plist)))
+   SNOWLEOPARD = $(strip $(findstring 10.6, $(shell egrep "<string>10\.6" /System/Library/CoreServices/SystemVersion.plist)))
 endif
 
 # detect 32-bit or 64-bit platform
@@ -52,6 +52,7 @@ BINDIR     ?= $(ROOTBINDIR)/$(OSLOWER)
 ROOTOBJDIR ?= obj
 LIBDIR     := $(ROOTDIR)/../lib
 COMMONDIR  := $(ROOTDIR)/../common
+SHAREDDIR  := $(ROOTDIR)/../../shared/
 
 # Compilers
 NVCC       := $(CUDA_INSTALL_PATH)/bin/nvcc 
@@ -60,7 +61,7 @@ CC         := gcc
 LINK       := g++ -fPIC
 
 # Includes
-INCLUDES  += -I. -I$(CUDA_INSTALL_PATH)/include -I$(COMMONDIR)/inc
+INCLUDES  += -I. -I$(CUDA_INSTALL_PATH)/include -I$(COMMONDIR)/inc -I$(SHAREDDIR)/inc
 
 # Warning flags
 CXXWARN_FLAGS := \
@@ -94,8 +95,9 @@ LIB_ARCH        := $(OSARCH)
 # Determining the necessary Cross-Compilation Flags
 # 32-bit OS, but we target 64-bit cross compilation
 ifeq ($(x86_64),1) 
-    NVCCFLAGS += -m64
-    LIB_ARCH = x86_64
+    NVCCFLAGS       += -m64
+    LIB_ARCH         = x86_64
+    CUDPPLIB_SUFFIX  = x86_64
 
     ifneq ($(DARWIN),)
          CXX_ARCH_FLAGS += -arch x86_64
@@ -105,8 +107,10 @@ ifeq ($(x86_64),1)
 else 
 # 64-bit OS, and we target 32-bit cross compilation
     ifeq ($(i386),1)
-        NVCCFLAGS += -m32
-        LIB_ARCH = i386
+        NVCCFLAGS       += -m32
+        LIB_ARCH         = i386
+        CUDPPLIB_SUFFIX  = i386
+
         ifneq ($(DARWIN),)
              CXX_ARCH_FLAGS += -arch i386
         else
@@ -115,16 +119,29 @@ else
     else 
         ifneq ($(SNOWLEOPARD),)
              NVCCFLAGS += -m32
-             CXX_ARCH_FLAGS += -arch i386 -m32
-             LIB_ARCH  = i386
+             CXX_ARCH_FLAGS += -m32 -arch i386
+             LIB_ARCH        = i386
+             CUDPPLIB_SUFFIX = i386
+        else
+             ifeq "$(strip $(HP_64))" ""
+                LIB_ARCH        = i386
+                CUDPPLIB_SUFFIX = i386
+             else
+                LIB_ARCH        = x86_64
+                CUDPPLIB_SUFFIX = x86_64
+             endif
         endif
     endif
 endif
 
-# Compiler-specific flags
-CXXFLAGS  := $(CXXWARN_FLAGS) $(CXX_ARCH_FLAGS)
-CFLAGS    := $(CWARN_FLAGS) $(CXX_ARCH_FLAGS)
-LINK      += $(CXX_ARCH_FLAGS)
+# Compiler-specific flags (by default, we always use sm_10 and sm_20), unless we use the SMVERSION template
+GENCODE_SM10 := -gencode=arch=compute_10,code=\"sm_10,compute_10\"
+GENCODE_SM20 := -gencode=arch=compute_20,code=\"sm_20,compute_20\"
+
+CXXFLAGS  += $(CXXWARN_FLAGS) $(CXX_ARCH_FLAGS)
+CFLAGS    += $(CWARN_FLAGS) $(CXX_ARCH_FLAGS)
+LINKFLAGS +=
+LINK      += $(LINKFLAGS) $(CXX_ARCH_FLAGS)
 
 # This option for Mac allows CUDA applications to work without requiring to set DYLD_LIBRARY_PATH
 ifneq ($(DARWIN),)
@@ -143,11 +160,13 @@ ifeq ($(dbg),1)
 	BINSUBDIR   := debug
 	LIBSUFFIX   := D
 else 
-	COMMONFLAGS += -O2 
-	BINSUBDIR   := release
+	#COMMONFLAGS += -O2 
+	COMMONFLAGS += -O0
+        BINSUBDIR   := release
 	LIBSUFFIX   := 
-	NVCCFLAGS   += --compiler-options -fno-strict-aliasing
-	CXXFLAGS    += -fno-strict-aliasing
+	#NVCCFLAGS   += --compiler-options -fno-strict-aliasing
+	NVCCFLAGS += --compiler-options -fno-strict-aliasing --compiler-options -fno-inline
+        CXXFLAGS    += -fno-strict-aliasing
 	CFLAGS      += -fno-strict-aliasing
 endif
 
@@ -217,35 +236,8 @@ ifeq ($(USERENDERCHECKGL),1)
 endif
 
 ifeq ($(USECUDPP), 1)
-    ifeq ($(x86_64),1)
-        CUDPPLIB := -lcudpp64
-    else
-        ifneq ($(SNOWLEOPARD),) 
-            CUDPPLIB := -lcudpp
-        else
-            ifeq "$(strip $(HP_64))" ""
-               CUDPPLIB := -lcudpp
-            else
-               CUDPPLIB := -lcudpp64
-            endif
-        endif
-    endif
+    CUDPPLIB := -lcudpp_$(CUDPPLIB_SUFFIX)$(LIBSUFFIX)
 
-    ifeq ($(i386),1)
-        CUDPPLIB := -lcudpp
-    else
-        ifneq ($(SNOWLEOPARD),) 
-            CUDPPLIB := -lcudpp
-        else
-            ifeq "$(strip $(HP_64))" ""
-               CUDPPLIB := -lcudpp
-            else
-               CUDPPLIB := -lcudpp64
-            endif
-        endif
-    endif
-
-    CUDPPLIB := $(CUDPPLIB)$(LIBSUFFIX)
     ifeq ($(emu), 1)
         CUDPPLIB := $(CUDPPLIB)_emu
     endif
@@ -259,19 +251,19 @@ endif
 
 # Libs
 ifneq ($(DARWIN),)
-    LIB       := -L$(CUDA_INSTALL_PATH)/lib -L$(LIBDIR) -L$(COMMONDIR)/lib/$(OSLOWER) $(NVCUVIDLIB) 
+    LIB       := -L$(CUDA_INSTALL_PATH)/lib -L$(LIBDIR) -L$(COMMONDIR)/lib/$(OSLOWER) -L$(SHAREDDIR)/lib $(NVCUVIDLIB) 
 else
   ifeq "$(strip $(HP_64))" ""
     ifeq ($(x86_64),1)
-       LIB       := -L$(CUDA_INSTALL_PATH)/lib64 -L$(LIBDIR) -L$(COMMONDIR)/lib/$(OSLOWER) 
+       LIB       := -L$(CUDA_INSTALL_PATH)/lib64 -L$(LIBDIR) -L$(COMMONDIR)/lib/$(OSLOWER) -L$(SHAREDDIR)/lib 
     else
-       LIB       := -L$(CUDA_INSTALL_PATH)/lib -L$(LIBDIR) -L$(COMMONDIR)/lib/$(OSLOWER) 
+       LIB       := -L$(CUDA_INSTALL_PATH)/lib -L$(LIBDIR) -L$(COMMONDIR)/lib/$(OSLOWER) -L$(SHAREDDIR)/lib
     endif
   else
     ifeq ($(i386),1)
-       LIB       := -L$(CUDA_INSTALL_PATH)/lib -L$(LIBDIR) -L$(COMMONDIR)/lib/$(OSLOWER) 
+       LIB       := -L$(CUDA_INSTALL_PATH)/lib -L$(LIBDIR) -L$(COMMONDIR)/lib/$(OSLOWER) -L$(SHAREDDIR)/lib
     else
-       LIB       := -L$(CUDA_INSTALL_PATH)/lib64 -L$(LIBDIR) -L$(COMMONDIR)/lib/$(OSLOWER) 
+       LIB       := -L$(CUDA_INSTALL_PATH)/lib64 -L$(LIBDIR) -L$(COMMONDIR)/lib/$(OSLOWER) -L$(SHAREDDIR)/lib
     endif
   endif
 endif
@@ -284,7 +276,12 @@ else
   ifeq ($(USEDRVAPI),1)
      LIB += -lcuda   ${OPENGLLIB} $(PARAMGLLIB) $(RENDERCHECKGLLIB) $(CUDPPLIB) ${LIB} 
   else
-     LIB += -lcudart ${OPENGLLIB} $(PARAMGLLIB) $(RENDERCHECKGLLIB) $(CUDPPLIB) ${LIB}
+     ifeq ($(emu),1) 
+         LIB += -lcudartemu
+     else 
+         LIB += -lcudart
+     endif
+     LIB += ${OPENGLLIB} $(PARAMGLLIB) $(RENDERCHECKGLLIB) $(CUDPPLIB) ${LIB}
   endif
 endif
 
@@ -311,7 +308,7 @@ ifneq ($(STATIC_LIB),)
 	LINKLINE  = ar rucv $(TARGET) $(OBJS)
 else
 	ifneq ($(OMIT_CUTIL_LIB),1)
-		LIB += -lcutil_$(LIB_ARCH)$(LIBSUFFIX)
+		LIB += -lcutil_$(LIB_ARCH)$(LIBSUFFIX) -lshrutil_$(LIB_ARCH)$(LIBSUFFIX)
 	endif
 	# Device emulation configuration
 	ifeq ($(emu), 1)
@@ -392,11 +389,13 @@ $(OBJDIR)/%.c.o : $(SRCDIR)%.c $(C_DEPS)
 $(OBJDIR)/%.cpp.o : $(SRCDIR)%.cpp $(C_DEPS)
 	$(VERBOSE)$(CXX) $(CXXFLAGS) -o $@ -c $<
 
+# Default arch includes gencode for sm_10, sm_20, and other archs from GENCODE_ARCH declared in the makefile
 $(OBJDIR)/%.cu.o : $(SRCDIR)%.cu $(CU_DEPS)
-	$(VERBOSE)$(NVCC) $(NVCCFLAGS) $(SMVERSIONFLAGS) -o $@ -c $<
+	$(VERBOSE)$(NVCC) $(GENCODE_SM10) $(GENCODE_ARCH) $(GENCODE_SM20) $(NVCCFLAGS) $(SMVERSIONFLAGS) -o $@ -c $<
 
+# Default arch includes gencode for sm_10, sm_20, and other archs from GENCODE_ARCH declared in the makefile
 $(CUBINDIR)/%.cubin : $(SRCDIR)%.cu cubindirectory
-	$(VERBOSE)$(NVCC) $(CUBIN_ARCH_FLAG) $(NVCCFLAGS) $(SMVERSIONFLAGS) -o $@ -cubin $<
+	$(VERBOSE)$(NVCC) $(GENCODE_SM10) $(GENCODE_ARCH) $(GENCODE_SM20) $(CUBIN_ARCH_FLAG) $(NVCCFLAGS) $(SMVERSIONFLAGS) -o $@ -cubin $<
 
 $(PTXDIR)/%.ptx : $(SRCDIR)%.cu ptxdirectory
 	$(VERBOSE)$(NVCC) $(CUBIN_ARCH_FLAG) $(NVCCFLAGS) $(SMVERSIONFLAGS) -o $@ -ptx $<
@@ -411,14 +410,17 @@ $(PTXDIR)/%.ptx : $(SRCDIR)%.cu ptxdirectory
 # The intended use for this is to allow Makefiles that use common.mk to compile
 # files to different Compute Capability targets (aka SM arch version).  To do
 # so, in the Makefile, list files for each SM arch separately, like so:
+# This will be used over the default rule abov
 #
 # CUFILES_sm_10 := mycudakernel_sm10.cu app.cu
 # CUFILES_sm_12 := anothercudakernel_sm12.cu
 #
 define SMVERSION_template
-OBJS += $(patsubst %.cu,$(OBJDIR)/%.cu_$(1).o,$(notdir $(CUFILES_$(1))))
+#OBJS += $(patsubst %.cu,$(OBJDIR)/%.cu_$(1).o,$(notdir $(CUFILES_$(1))))
+OBJS += $(patsubst %.cu,$(OBJDIR)/%.cu_$(1).o,$(notdir $(CUFILES_sm_$(1))))
 $(OBJDIR)/%.cu_$(1).o : $(SRCDIR)%.cu $(CU_DEPS)
-	$(VERBOSE)$(NVCC) -o $$@ -c $$< $(NVCCFLAGS) -arch $(1)
+#	$(VERBOSE)$(NVCC) -o $$@ -c $$< $(NVCCFLAGS)  $(1)
+	$(VERBOSE)$(NVCC) -gencode=arch=compute_$(1),code=\"sm_$(1),compute_$(1)\" $(GENCODE_SM20) -o $$@ -c $$< $(NVCCFLAGS)
 endef
 
 # This line invokes the above template for each arch version stored in
