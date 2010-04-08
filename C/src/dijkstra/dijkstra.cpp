@@ -25,12 +25,19 @@
 #include <math.h>
 #include <vector>
 #include <multithreading.h>
+#include <sstream>
 
 // includes, project
 #include <cutil_inline.h>
+#include "shrUtils.h"
 
 // includes, kernels
 #include "dijkstra_kernel.h"
+
+///
+//  Macro Options
+//
+//#define CITY_DATA
 
 ///
 //  Some test data
@@ -127,6 +134,44 @@ float weightArray[] =
 void runTest( int argc, char** argv);
 void printDeviceInfo( int argc, char** argv);
 
+///
+//  Generate a random graph
+//
+void generateRandomGraph(GraphData *graph, int numVertices, int neighborsPerVertex)
+{
+    graph->vertexCount = numVertices;
+    graph->vertexArray = (int*) malloc(graph->vertexCount * sizeof(int));
+    graph->edgeCount = numVertices * neighborsPerVertex;
+    graph->edgeArray = (int*)malloc(graph->edgeCount * sizeof(int));
+    graph->weightArray = (float*)malloc(graph->edgeCount * sizeof(float));
+
+    for(int i = 0; i < graph->vertexCount; i++)
+    {
+        graph->vertexArray[i] = i * neighborsPerVertex;
+    }
+
+    for(int i = 0; i < graph->edgeCount; i++)
+    {
+        graph->edgeArray[i] = (rand() % graph->vertexCount);
+        graph->weightArray[i] = (float)(rand() % 1000) / 1000.0f;
+    }
+}
+
+///
+//  Parse command line arguments
+//
+void parseCommandLineArgs(int argc, const char **argv, bool &doGPU,
+                          bool &doMultiGPU, bool &doRef,
+                          int *numSources, int *generateVerts, int *generateEdgesPerVert)
+{
+    doGPU = shrCheckCmdLineFlag(argc, argv, "gpu");
+    doMultiGPU = shrCheckCmdLineFlag(argc, argv, "multigpu");
+    doRef = shrCheckCmdLineFlag(argc, argv, "ref");
+    shrGetCmdLineArgumenti(argc, argv, "sources", numSources);   
+    shrGetCmdLineArgumenti(argc, argv, "verts", generateVerts);
+    shrGetCmdLineArgumenti(argc, argv, "edges", generateEdgesPerVert);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
 ////////////////////////////////////////////////////////////////////////////////
@@ -136,7 +181,7 @@ main( int argc, char** argv)
     printDeviceInfo(argc, argv);
     runTest( argc, argv);
 
-    cutilExit(argc, argv);
+   // cutilExit(argc, argv);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -154,61 +199,116 @@ cutWaitForThreads(NULL,0);
 	else
 		cudaSetDevice( cutGetMaxGflopsDeviceId() );
 
+    bool doGPU;
+    bool doRef;
+    bool doMultiGPU;
+    int generateVerts;
+    int generateEdgesPerVert;
+    int numSources;
+
+    parseCommandLineArgs(argc, (const char**)argv, doGPU, doMultiGPU, doRef, &numSources, &generateVerts, &generateEdgesPerVert);
+
     // Allocate memory for arrays
     GraphData graph;
+#ifdef CITY_DATA
     graph.vertexCount = sizeof(vertexArray) / sizeof(int);
     graph.edgeCount = sizeof(edgeArray) / sizeof(int);
     graph.vertexArray = &vertexArray[0];
     graph.edgeArray = &edgeArray[0];
     graph.weightArray = &weightArray[0];
-
+#else
+    generateRandomGraph(&graph, generateVerts, generateEdgesPerVert);
+#endif
 
     printf("Vertex Count: %d\n", graph.vertexCount);
     printf("Edge Count: %d\n", graph.edgeCount);
 
     std::vector<int> sourceVertices;
-    std::vector<int> endVertices;
 
-    for (int k = 0; k < 1000; k++)
+
+    for(int source = 0; source < numSources; source++)
     {
-        for(int source = 0; source < graph.vertexCount; source++)
-        {
-            for (int i = 0; i < graph.vertexCount; i++ )
-            {
-                if (i != source)
-                {
-                    sourceVertices.push_back(source);
-                    endVertices.push_back(i);
-                }
-            }
-        }
+        sourceVertices.push_back(source % graph.vertexCount);
     }
 
     int *sourceVertArray = (int*) malloc(sizeof(int) * sourceVertices.size());
     std::copy(sourceVertices.begin(), sourceVertices.end(), sourceVertArray);
 
-    int *endVertArray = (int*) malloc(sizeof(int) * endVertices.size());
-    std::copy(endVertices.begin(), endVertices.end(), endVertArray);
+    float *results = (float*) malloc(sizeof(float) * sourceVertices.size() * graph.vertexCount);
 
-    float *results = (float*) malloc(sizeof(float) * endVertices.size());
 
-    unsigned int timer = 0;
-    cutilCheckError(cutCreateTimer(&timer));
-    cutilCheckError(cutStartTimer(timer));
+    unsigned int gpuTimer = 0;
+    cutilCheckError(cutCreateTimer(&gpuTimer));
+    cutilCheckError(cutStartTimer(gpuTimer));
 
     // Run Dijkstra's algorithm
-    runDijkstraMultiGPU(&graph, sourceVertArray, endVertArray, results, sourceVertices.size() );
+    if ( doGPU )
+    {
+        runDijkstra(&graph, sourceVertArray, results, sourceVertices.size() );
+    }
 
-    cutilCheckError(cutStopTimer(timer));
+    cutilCheckError(cutStopTimer(gpuTimer));
 
+
+    unsigned int multiGPUTimer = 0;
+    cutilCheckError(cutCreateTimer(&multiGPUTimer));
+    cutilCheckError(cutStartTimer(multiGPUTimer));
+
+    if ( doMultiGPU )
+    {
+        runDijkstraMultiGPU(&graph, sourceVertArray, results, sourceVertices.size() );
+    }
+
+    cutilCheckError(cutStopTimer(multiGPUTimer));
+
+    unsigned int refTimer = 0;
+    cutilCheckError(cutCreateTimer(&refTimer));
+    cutilCheckError(cutStartTimer(refTimer));
+
+    if ( doRef )
+    {
+        runDijkstraRef(&graph, sourceVertArray, results, sourceVertices.size() );
+    }
+
+    cutilCheckError(cutStopTimer(refTimer));
+
+#ifdef CITY_DATA
     for (unsigned int i = 0; i < sourceVertices.size(); i++)
     {
-        printf("%s --> %s: %f\n", vNames[sourceVertArray[i]], vNames[endVertArray[i]], results[i] );
+        for (int j = 0; j < graph.vertexCount; j++)
+        {
+            if (i != j)
+            {
+                printf("%s --> %s: %f\n", vNames[sourceVertArray[i]], vNames[j], results[i * graph.vertexCount + j] );
+            }
+        }
     }
-    printf("Total GPU Processing time: %f (ms) \n", cutGetTimerValue(timer));
+#endif
+
+    std::ostringstream oss;
+    oss << "\nCSV: " << graph.vertexCount << " " << generateEdgesPerVert << " " << numSources << " ";
+    
+    if (doGPU)
+    {
+        shrLog("\nrunDijkstra - Single GPU Time:        %f s\n", cutGetTimerValue(gpuTimer) / 1000.0f);
+        oss << ( cutGetTimerValue(gpuTimer) / 1000.0f ) << " ";
+    }
+
+    if (doMultiGPU)
+    {
+        shrLog("\nrunDijkstra - Multi GPU Time:         %f s\n", cutGetTimerValue(multiGPUTimer) / 1000.0f);
+        oss << cutGetTimerValue(multiGPUTimer) / 1000.0f << " ";
+    }
+
+    if (doRef)
+    {
+        shrLog("\nrunDijkstra - Reference (CPU):        %f s\n", cutGetTimerValue(refTimer) / 1000.0f);
+        oss << (cutGetTimerValue(refTimer) / 1000.0f) << " ";
+    }
+    oss << "\n";
+    shrLog(oss.str().c_str());
 
     free(sourceVertArray);
-    free(endVertArray);
     free(results);
 
     cudaThreadExit();
