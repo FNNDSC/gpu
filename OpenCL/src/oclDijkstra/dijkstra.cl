@@ -19,7 +19,7 @@
 /// This is part 1 of the Kernel from Algorithm 4 in the paper
 ///
 __kernel  void OCL_SSSP_KERNEL1(__global int *vertexArray, __global int *edgeArray, __global float *weightArray,
-                               __global unsigned char *maskArray, __global float *costArray, __global float *updatingCostArray,
+                               __global int *maskArray, __global float *costArray, __global float *updatingCostArray,
                                int vertexCount, int edgeCount )
 {
     // access thread id
@@ -61,7 +61,7 @@ __kernel  void OCL_SSSP_KERNEL1(__global int *vertexArray, __global int *edgeArr
 /// is to stop the search after hitting endVertex
 ///
 __kernel  void OCL_SSSP_KERNEL2(__global int *vertexArray, __global int *edgeArray, __global float *weightArray,
-                                __global unsigned char *maskArray, __global float *costArray, __global float *updatingCostArray,
+                                __global int *maskArray, __global float *costArray, __global float *updatingCostArray,
                                 int vertexCount)
 {
     // access thread id
@@ -81,7 +81,7 @@ __kernel  void OCL_SSSP_KERNEL2(__global int *vertexArray, __global int *edgeArr
 ///
 /// Kernel to initialize buffers
 ///
-__kernel void initializeBuffers( __global unsigned char *maskArray, __global float *costArray, __global float *updatingCostArray,
+__kernel void initializeBuffers( __global int *maskArray, __global float *costArray, __global float *updatingCostArray,
                                  int sourceVertex, int vertexCount )
 {
     // access thread id

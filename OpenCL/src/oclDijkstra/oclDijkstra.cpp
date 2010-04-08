@@ -24,15 +24,13 @@
  */
 
 #include <oclUtils.h>
+#include <pthread.h>
+#include <sstream>
 #include "oclDijkstraKernel.h"
 
 ///
 //  Macro Options
 //
-//#define DO_CPU
-//#define DO_GPU
-//#define DO_MULTI_GPU
-#define DO_MULTI_GPU_CPU
 
 //#define CITY_DATA
 
@@ -152,29 +150,89 @@ void generateRandomGraph(GraphData *graph, int numVertices, int neighborsPerVert
     }
 }
 
+///
+//  Parse command line arguments
+//
+void parseCommandLineArgs(int argc, const char **argv, bool &doCPU, bool &doGPU,
+                          bool &doMultiGPU, bool &doCPUGPU, bool &doRef,
+                          int *sourceVerts,
+                          int *generateVerts, int *generateEdgesPerVert)
+{
+    doCPU = shrCheckCmdLineFlag(argc, argv, "cpu");
+    doGPU = shrCheckCmdLineFlag(argc, argv, "gpu");
+    doMultiGPU = shrCheckCmdLineFlag(argc, argv, "multigpu");
+    doCPUGPU = shrCheckCmdLineFlag(argc, argv, "cpugpu");
+    doRef = shrCheckCmdLineFlag(argc, argv, "ref");
+    shrGetCmdLineArgumenti(argc, argv, "sources", sourceVerts);
+    shrGetCmdLineArgumenti(argc, argv, "verts", generateVerts);
+    shrGetCmdLineArgumenti(argc, argv, "edges", generateEdgesPerVert);
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
 ////////////////////////////////////////////////////////////////////////////////
 int main(int argc, const char **argv)
 {
+    bool doCPU = false;
+    bool doGPU = false;
+    bool doMultiGPU = false;
+    bool doCPUGPU = false;
+    bool doRef = false;
+    int numSources = 100;
+    int generateVerts = 100000;
+    int generateEdgesPerVert = 10;
+
+    parseCommandLineArgs(argc, argv, doCPU, doGPU,
+                         doMultiGPU, doCPUGPU, doRef,
+                         &numSources, &generateVerts, &generateEdgesPerVert);
     // start logs 
     shrSetLogFileName ("oclDijkstra.txt");
 
+    cl_platform_id platform;
     cl_context gpuContext;
     cl_context cpuContext;
     cl_int errNum;
+    cl_uint gpuDeviceCount;
+    cl_device_id* gpuDevices;
+    cl_uint cpuDeviceCount;
+    cl_device_id* cpuDevices;
+    
 
     // start timer & logs
-    shrLog(LOGBOTH, 0.0, "Setting up OpenCL on the Host...\n\n");
+    shrLog("Setting up OpenCL on the Host...\n\n");
     shrDeltaT(1);
 
+    // Get the NVIDIA platform
+    errNum = oclGetPlatformID(&platform);
+    oclCheckError(errNum, CL_SUCCESS);
+    shrLog("clGetPlatformID...\n");
+
+    // Get the devices
+    errNum = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 0, NULL, &gpuDeviceCount);
+    oclCheckError(errNum, CL_SUCCESS);
+    gpuDevices = (cl_device_id *)malloc(gpuDeviceCount * sizeof(cl_device_id) );
+    errNum = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, gpuDeviceCount, gpuDevices, NULL);
+    oclCheckError(errNum, CL_SUCCESS);
+    shrLog("clGetDeviceIDs...\n");
+
+
+    errNum = clGetDeviceIDs(platform, CL_DEVICE_TYPE_CPU, 0, NULL, &cpuDeviceCount);
+    cpuDevices = (cl_device_id *)malloc(cpuDeviceCount * sizeof(cl_device_id) );
+    errNum = clGetDeviceIDs(platform, CL_DEVICE_TYPE_CPU, cpuDeviceCount, cpuDevices, NULL);
+//    oclCheckError(errNum, CL_SUCCESS);
+    shrLog("clGetDeviceIDs...\n");
+
+
+
+
     // create the OpenCL context on available GPU devices
-    gpuContext = clCreateContextFromType(0, CL_DEVICE_TYPE_GPU, NULL, NULL, &errNum);
-    shrLog(LOGBOTH, 0.0, "clCreateContextFromType\n\n");
+    gpuContext = clCreateContext(0, gpuDeviceCount, gpuDevices, NULL, NULL, &errNum);
+    shrLog("clCreateContext\n\n");
 
     // Create an OpenCL context on available CPU devices
-    cpuContext = clCreateContextFromType(0, CL_DEVICE_TYPE_CPU, NULL, NULL, &errNum);
-    shrLog(LOGBOTH, 0.0, "clCreateContextFromType");
+    cpuContext = clCreateContext(0, cpuDeviceCount, cpuDevices, NULL, NULL, &errNum);
+    shrLog("clCreateContextFromType");
 
     // Allocate memory for arrays
     GraphData graph;
@@ -185,7 +243,7 @@ int main(int argc, const char **argv)
     graph.edgeArray = &edgeArray[0];
     graph.weightArray = &weightArray[0];
 #else
-    generateRandomGraph(&graph, 98000, 100);
+    generateRandomGraph(&graph, generateVerts, generateEdgesPerVert);
 #endif
 
 
@@ -195,9 +253,9 @@ int main(int argc, const char **argv)
     std::vector<int> sourceVertices;
 
 
-    for(int source = 0; source < 200; source++)
+    for(int source = 0; source < numSources; source++)
     {
-        sourceVertices.push_back(source);
+        sourceVertices.push_back(source % graph.vertexCount);
     }
 
     int *sourceVertArray = (int*) malloc(sizeof(int) * sourceVertices.size());
@@ -208,33 +266,45 @@ int main(int argc, const char **argv)
 
     // Run Dijkstra's algorithm
     shrDeltaT(0);
-#ifdef DO_CPU
     double startTimeCPU = shrDeltaT(0);
-    runDijkstra(cpuContext, oclGetMaxFlopsDev(cpuContext), &graph, sourceVertArray,
-                results, sourceVertices.size() );
+    if (doCPU)
+    {
+        runDijkstra(cpuContext, oclGetMaxFlopsDev(cpuContext), &graph, sourceVertArray,
+                    results, sourceVertices.size() );
+    }
     double endTimeCPU = shrDeltaT(0);
-#endif
 
-#ifdef DO_GPU
     double startTimeGPU = shrDeltaT(0);
-    runDijkstra(gpuContext, oclGetMaxFlopsDev(gpuContext), &graph, sourceVertArray,
-                results, sourceVertices.size() );
+    if (doGPU)
+    {
+        runDijkstra(gpuContext, oclGetMaxFlopsDev(gpuContext), &graph, sourceVertArray,
+                    results, sourceVertices.size() );
+    }
     double endTimeGPU = shrDeltaT(0);
-#endif
 
-#ifdef DO_MULTI_GPU
     double startTimeMultiGPU = shrDeltaT(0);
-    runDijkstraMultiGPU(gpuContext, &graph, sourceVertArray,
-                        results, sourceVertices.size() );
+    if (doMultiGPU)
+    {
+        runDijkstraMultiGPU(gpuContext, &graph, sourceVertArray,
+                            results, sourceVertices.size() );
+    }
     double endTimeMultiGPU = shrDeltaT(0);
-#endif
 
-#ifdef DO_MULTI_GPU_CPU
     double startTimeGPUCPU = shrDeltaT(0);
-    runDijkstraMultiGPUandCPU(gpuContext, cpuContext, &graph, sourceVertArray,
-                              results, sourceVertices.size() );
+    if (doCPUGPU)
+    {
+        runDijkstraMultiGPUandCPU(gpuContext, cpuContext, &graph, sourceVertArray,
+                                  results, sourceVertices.size() );
+    }
     double endTimeGPUCPU = shrDeltaT(0);
-#endif
+
+    double startTimeRef = shrDeltaT(0);
+    if (doRef)
+    {
+        runDijkstraRef( &graph, sourceVertArray,
+                        results, sourceVertices.size() );
+    }
+    double endTimeRef = shrDeltaT(0);
 
 #ifdef CITY_DATA
     for (unsigned int i = 0; i < sourceVertices.size(); i++)
@@ -250,27 +320,47 @@ int main(int argc, const char **argv)
 #endif
 
 
-#ifdef DO_CPU
-    shrLog(LOGBOTH, 0.0, "\nrunDijkstra - CPU Time:               %f s\n", endTimeCPU - startTimeCPU);
-#endif
+    std::ostringstream oss;
+    oss << "\nCSV: " << graph.vertexCount << " " << generateEdgesPerVert << " " << numSources << " ";
+    if (doCPU)
+    {
+        shrLog("\nrunDijkstra - CPU Time:               %f s\n", endTimeCPU - startTimeCPU);
+        oss << (endTimeCPU - startTimeCPU) << " ";
+    }
 
-#ifdef DO_GPU
-    shrLog(LOGBOTH, 0.0, "\nrunDijkstra - Single GPU Time:        %f s\n", endTimeGPU - startTimeGPU);
-#endif
+    if (doGPU)
+    {
+        shrLog("\nrunDijkstra - Single GPU Time:        %f s\n", endTimeGPU - startTimeGPU);
+        oss << (endTimeGPU - startTimeGPU) << " ";
+    }
 
-#ifdef DO_MULTI_GPU
-    shrLog(LOGBOTH, 0.0, "\nrunDijkstra - Multi GPU Time:         %f s\n", endTimeMultiGPU - startTimeMultiGPU);
-#endif
+    if (doMultiGPU)
+    {
+        shrLog("\nrunDijkstra - Multi GPU Time:         %f s\n", endTimeMultiGPU - startTimeMultiGPU);
+        oss << (endTimeMultiGPU - startTimeMultiGPU) << " ";
+    }
 
-#ifdef DO_MULTI_GPU_CPU
-    shrLog(LOGBOTH, 0.0, "\nrunDijkstra - Multi GPU and CPU Time: %f s\n", endTimeGPUCPU - startTimeGPUCPU);
-#endif
+    if (doCPUGPU)
+    {
+        shrLog("\nrunDijkstra - Multi GPU and CPU Time: %f s\n", endTimeGPUCPU - startTimeGPUCPU);
+        oss << (endTimeGPUCPU - startTimeGPUCPU) << " ";
+    }
+
+    if (doRef)
+    {
+        shrLog("\nrunDijkstra - Reference (CPU):        %f s\n", endTimeRef - startTimeRef);
+        oss << (endTimeRef - startTimeRef) << " ";
+    }
+    oss << "\n";
+    shrLog(oss.str().c_str());
 
     free(sourceVertArray);
     free(results);
+    free(gpuDevices);
+    free(cpuDevices);
 
     clReleaseContext(gpuContext);
 
     // finish
-    shrEXIT(argc, argv);
+    //shrEXIT(argc, argv);
  }

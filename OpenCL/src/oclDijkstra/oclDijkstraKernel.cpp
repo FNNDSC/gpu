@@ -20,6 +20,11 @@
 #include "oclDijkstraKernel.h"
 
 ///
+//  Constants
+//
+const int NUM_ASYNC_ITERATIONS = 1;
+
+///
 //  Types
 //
 
@@ -74,24 +79,24 @@ cl_program loadAndBuildProgram( cl_context gpuContext, const char *fileName )
     const char* sourcePath = shrFindFilePath( fileName, "oclDijkstra");
     char *source = oclLoadProgSource(sourcePath, "", &programLength);
     shrCheckError(source != NULL, shrTRUE);
-    shrLog(LOGBOTH, 0.0, "oclLoadProgSource\n");
+    shrLog("oclLoadProgSource\n");
 
     // Create the program for all GPUs in the context
     program = clCreateProgramWithSource(gpuContext, 1, (const char **)&source, &programLength, &errNum);
     shrCheckError(errNum, CL_SUCCESS);
-    shrLog(LOGBOTH, 0.0, "clCreateProgramWithSource\n");
+    shrLog("clCreateProgramWithSource\n");
 
     // build the program for all devices on the context
     errNum = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
     if (errNum != CL_SUCCESS)
     {
         // write out standard error, Build Log and PTX, then cleanup and exit
-        shrLog(LOGBOTH | ERRORMSG, (double)errNum, STDERROR);
+        shrLogEx(LOGBOTH | ERRORMSG, (double)errNum, STDERROR);
         oclLogBuildInfo(program, oclGetFirstDev(gpuContext));
         oclLogPtx(program, oclGetFirstDev(gpuContext), "oclDijkstra.ptx");
         shrCheckError(errNum, CL_SUCCESS);
     }
-    shrLog(LOGBOTH, 0.0, "clBuildProgram\n");
+    shrLog("clBuildProgram\n");
 
     return program;
 }
@@ -100,7 +105,7 @@ cl_program loadAndBuildProgram( cl_context gpuContext, const char *fileName )
 /// Check whether the mask array is empty.  This tells the algorithm whether
 /// it needs to continue running or not.
 ///
-bool maskArrayEmpty(unsigned char *maskArray, int count)
+bool maskArrayEmpty(int *maskArray, int count)
 {
     for(int i = 0; i < count; i++ )
     {
@@ -146,7 +151,7 @@ void allocateOCLBuffers(cl_context gpuContext, cl_command_queue commandQueue, Gr
     shrCheckError(errNum, CL_SUCCESS);
     *weightArrayDevice = clCreateBuffer(gpuContext, CL_MEM_READ_ONLY, sizeof(float) * graph->edgeCount, NULL, &errNum);
     shrCheckError(errNum, CL_SUCCESS);
-    *maskArrayDevice = clCreateBuffer(gpuContext, CL_MEM_READ_WRITE, sizeof(unsigned char) * globalWorkSize, NULL, &errNum);
+    *maskArrayDevice = clCreateBuffer(gpuContext, CL_MEM_READ_WRITE, sizeof(int) * globalWorkSize, NULL, &errNum);
     shrCheckError(errNum, CL_SUCCESS);
     *costArrayDevice = clCreateBuffer(gpuContext, CL_MEM_READ_WRITE, sizeof(float) * globalWorkSize, NULL, &errNum);
     shrCheckError(errNum, CL_SUCCESS);
@@ -195,7 +200,7 @@ void dijkstraThread(DevicePlan *plan)
     runDijkstra( plan->context, plan->deviceId, plan->graph, plan->sourceVertices,
                  plan->outResultCosts, plan->numResults );
 
-    shrLog(LOGBOTH, 0.0, "Thread Done Device (%d)\n", plan->deviceId );
+    shrLog("Thread Done Device (%d)\n", plan->deviceId );
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -233,7 +238,7 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
     cl_command_queue commandQueue;
     commandQueue = clCreateCommandQueue( gpuContext, deviceId, 0, &errNum );
     shrCheckError(errNum, CL_SUCCESS);
-    shrLog(LOGBOTH, 0.0, "clCreateCommandQueue\n\n");
+    shrLog("clCreateCommandQueue\n\n");
 
     // Program handle
     cl_program program = loadAndBuildProgram( gpuContext, "dijkstra.cl" );
@@ -246,7 +251,7 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
     size_t maxWorkGroupSize;
     clGetDeviceInfo(deviceId, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxWorkGroupSize, NULL);
     shrCheckError(errNum, CL_SUCCESS);
-    shrLog(LOGBOTH, 0.0, "MAX_WORKGROUP_SIZE: %d\n", maxWorkGroupSize);
+    shrLog("MAX_WORKGROUP_SIZE: %d\n", maxWorkGroupSize);
 
     // Set # of work items in work group and total in 1 dimensional range
     size_t localWorkSize = maxWorkGroupSize;
@@ -273,8 +278,9 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
     errNum |= clSetKernelArg(initializeBuffersKernel, 0, sizeof(cl_mem), &maskArrayDevice);
     errNum |= clSetKernelArg(initializeBuffersKernel, 1, sizeof(cl_mem), &costArrayDevice);
     errNum |= clSetKernelArg(initializeBuffersKernel, 2, sizeof(cl_mem), &updatingCostArrayDevice);
+
     // 3 set below in loop
-    errNum |= clSetKernelArg(initializeBuffersKernel, 4, sizeof(cl_mem), &graph->vertexCount);
+    errNum |= clSetKernelArg(initializeBuffersKernel, 4, sizeof(cl_int), &graph->vertexCount);
     shrCheckError(errNum, CL_SUCCESS);
 
     // Kernel 1
@@ -305,9 +311,9 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
 
     shrCheckError(errNum, CL_SUCCESS);
 
-    unsigned char *maskArrayHost = (unsigned char*) malloc(sizeof(unsigned char) * graph->vertexCount);
+    int *maskArrayHost = (int*) malloc(sizeof(int) * graph->vertexCount);
 
-    shrLog(LOGBOTH, 0.0, "Num results: %d\n", numResults);
+    shrLog("Num results: %d\n", numResults);
 
     for ( int i = 0 ; i < numResults; i++ )
     {
@@ -320,6 +326,7 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
 
         // Read mask array from device -> host
         cl_event readDone;
+
         errNum = clEnqueueReadBuffer( commandQueue, maskArrayDevice, CL_FALSE, 0, sizeof(unsigned char) * graph->vertexCount,
                                       maskArrayHost, 0, NULL, &readDone);
         shrCheckError(errNum, CL_SUCCESS);
@@ -327,23 +334,27 @@ void runDijkstra( cl_context gpuContext, cl_device_id deviceId, GraphData* graph
 
         while(!maskArrayEmpty(maskArrayHost, graph->vertexCount))
         {
-            size_t localWorkSize = maxWorkGroupSize;
-            size_t globalWorkSize = shrRoundUp(localWorkSize, graph->vertexCount);
 
-            // execute the kernel
-            errNum = clEnqueueNDRangeKernel(commandQueue, ssspKernel1, 1, 0, &globalWorkSize, &localWorkSize,
-                                           0, NULL, NULL);
-            shrCheckError(errNum, CL_SUCCESS);
+            //for (int asyncIter = 0; asyncIter < NUM_ASYNC_ITERATIONS; asyncIter++)
+            {
+                size_t localWorkSize = maxWorkGroupSize;
+                size_t globalWorkSize = shrRoundUp(localWorkSize, graph->vertexCount);
 
-            errNum = clEnqueueNDRangeKernel(commandQueue, ssspKernel2, 1, 0, &globalWorkSize, &localWorkSize,
-                                           0, NULL, NULL);
-            shrCheckError(errNum, CL_SUCCESS);
+                // execute the kernel
+                errNum = clEnqueueNDRangeKernel(commandQueue, ssspKernel1, 1, 0, &globalWorkSize, &localWorkSize,
+                                               0, NULL, NULL);
+                shrCheckError(errNum, CL_SUCCESS);
 
+                errNum = clEnqueueNDRangeKernel(commandQueue, ssspKernel2, 1, 0, &globalWorkSize, &localWorkSize,
+                                               0, NULL, NULL);
+                shrCheckError(errNum, CL_SUCCESS);
+            }
             errNum = clEnqueueReadBuffer(commandQueue, maskArrayDevice, CL_FALSE, 0, sizeof(unsigned char) * graph->vertexCount,
-                                         maskArrayHost, 0, NULL, &readDone);
+                                                         maskArrayHost, 0, NULL, &readDone);
             shrCheckError(errNum, CL_SUCCESS);
             clWaitForEvents(1, &readDone);
         }
+
 
         // Copy the result back
         errNum = clEnqueueReadBuffer(commandQueue, costArrayDevice, CL_FALSE, 0, sizeof(float) * graph->vertexCount,
@@ -408,7 +419,7 @@ void runDijkstraMultiGPU( cl_context gpuContext, GraphData* graph, int *sourceVe
 
     if (deviceCount == 0)
     {
-        shrLog(LOGBOTH, 0.0, "ERROR: no GPUs present!");
+        shrLog("ERROR: no GPUs present!");
         return;
     }
 
@@ -480,7 +491,7 @@ void runDijkstraMultiGPUandCPU( cl_context gpuContext, cl_context cpuContext, Gr
                                 int *sourceVertices,
                                 float *outResultCosts, int numResults )
 {
-    float ratioCPUtoGPU = 2.26; // CPU seems to run it at 2.26X on GT120 GPU
+    float ratioCPUtoGPU = 1; // CPU seems to run it at 2.26X on GT120 GPU
 
     // Find out how many GPU's to compute on all available GPUs
     cl_int errNum;
@@ -494,7 +505,7 @@ void runDijkstraMultiGPUandCPU( cl_context gpuContext, cl_context cpuContext, Gr
 
     if (gpuDeviceCount == 0)
     {
-        shrLog(LOGBOTH, 0.0, "ERROR: no GPUs present!");
+        shrLog("ERROR: no GPUs present!");
         return;
     }
 
@@ -504,7 +515,7 @@ void runDijkstraMultiGPUandCPU( cl_context gpuContext, cl_context cpuContext, Gr
 
     if (cpuDeviceCount == 0)
     {
-        shrLog(LOGBOTH, 0.0, "ERROR: no CPUs present!");
+        shrLog("ERROR: no CPUs present!");
         return;
     }
 
@@ -572,6 +583,110 @@ void runDijkstraMultiGPUandCPU( cl_context gpuContext, cl_context cpuContext, Gr
 
     free (devicePlans);
     free (threadIDs);
+}
+
+///
+/// Run Dijkstra's shortest path on the GraphData provided to this function.  This
+/// function will compute the shortest path distance from sourceVertices[n] ->
+/// endVertices[n] and store the cost in outResultCosts[n].  The number of results
+/// it will compute is given by numResults.
+///
+/// This is a CPU *REFERENCE* implementation for use as a fallback.
+///
+/// \param graph Structure containing the vertex, edge, and weight arra
+///              for the input graph
+/// \param startVertices Indices into the vertex array from which to
+///                      start the search
+/// \param outResultsCosts A pre-allocated array where the results for
+///                        each shortest path search will be written.
+///                        This must be sized numResults * graph->numVertices.
+/// \param numResults Should be the size of all three passed inarrays
+///
+void runDijkstraRef( GraphData* graph, int *sourceVertices,
+                     float *outResultCosts, int numResults )
+{
+
+    // Create the arrays needed for processing the algorithm
+    float *costArray = new float[graph->vertexCount];
+    float *updatingCostArray = new float[graph->vertexCount];
+    int *maskArray = new int[graph->vertexCount];
+
+    for (int i = 0; i < numResults; i++)
+    {
+        // Initialize the buffer for this run
+        for (int v = 0; v < graph->vertexCount; v++)
+        {
+            if (v == sourceVertices[i])
+            {
+                maskArray[v] = 1;
+                costArray[v] = 0.0;
+                updatingCostArray[v] = 0.0;
+            }
+            else
+            {
+                maskArray[v] = 0;
+                costArray[v] = FLT_MAX;
+                updatingCostArray[v] = FLT_MAX;
+            }
+        }
+
+        while(!maskArrayEmpty(maskArray, graph->vertexCount))
+        {
+            // Equivalent of OCL_SSSP_KERNEL1()
+            for (int tid = 0; tid < graph->vertexCount; tid++)
+            {
+                if ( maskArray[tid] != 0 )
+                {
+                    maskArray[tid] = 0;
+
+                    int edgeStart = graph->vertexArray[tid];
+                    int edgeEnd;
+                    if (tid + 1 < (graph->vertexCount))
+                    {
+                        edgeEnd = graph->vertexArray[tid + 1];
+                    }
+                    else
+                    {
+                        edgeEnd = graph->edgeCount;
+                    }
+
+                    for(int edge = edgeStart; edge < edgeEnd; edge++)
+                    {
+                        int nid = graph->edgeArray[edge];
+
+                        // One note here: whereas the paper specified weightArray[nid], I
+                        //  found that the correct thing to do was weightArray[edge].  I think
+                        //  this was a typo in the paper.  Either that, or I misunderstood
+                        //  the data structure.
+                        if (updatingCostArray[nid] > (costArray[tid] + graph->weightArray[edge]))
+                        {
+                            updatingCostArray[nid] = (costArray[tid] + graph->weightArray[edge]);
+                        }
+                    }
+                }
+            }
+
+            // Equivalent of OCL_SSSP_KERNEL2()
+            for (int tid = 0; tid < graph->vertexCount; tid++)
+            {
+                if (costArray[tid] > updatingCostArray[tid])
+                {
+                    costArray[tid] = updatingCostArray[tid];
+                    maskArray[tid] = 1;
+                }
+
+                updatingCostArray[tid] = costArray[tid];
+            }
+        }
+
+        // Copy the result back
+        memcpy(&outResultCosts[i * graph->vertexCount], costArray, sizeof(float) * graph->vertexCount);
+    }
+
+    // Free temporary computation buffers
+    delete [] costArray;
+    delete [] updatingCostArray;
+    delete [] maskArray;
 }
 
 
