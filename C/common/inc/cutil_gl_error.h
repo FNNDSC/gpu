@@ -1,5 +1,5 @@
 /*
- * Copyright 1993-2009 NVIDIA Corporation.  All rights reserved.
+ * Copyright 1993-2010 NVIDIA Corporation.  All rights reserved.
  *
  * NVIDIA Corporation and its licensors retain all intellectual property and 
  * proprietary rights in and to this software and related documentation. 
@@ -10,7 +10,7 @@
  */
  
  /*
-* Copyright 1993-2009 NVIDIA Corporation.  All rights reserved.
+* Copyright 1993-2010 NVIDIA Corporation.  All rights reserved.
 *
 * NVIDIA Corporation and its licensors retain all intellectual property and 
 * proprietary rights in and to this software and related documentation and 
@@ -60,6 +60,13 @@ cutCheckErrorGL( const char* file, const int line)
 	GLenum gl_error = glGetError();
 	if (gl_error != GL_NO_ERROR) 
 	{
+#ifdef _WIN32
+		char tmpStr[512];
+		// NOTE: "%s(%i) : " allows Visual Studio to directly jump to the file at the right line
+		// when the user double clicks on the error line in the Output pane. Like any compile error.
+		sprintf_s(tmpStr, 255, "\n%s(%i) : GL Error : %s\n\n", file, line, gluErrorString(gl_error));
+		OutputDebugString(tmpStr);
+#endif
 		fprintf(stderr, "GL Error in file '%s' in line %d :\n", file, line);
 		fprintf(stderr, "%s\n", gluErrorString(gl_error));
 		ret_val = CUTFalse;
@@ -73,9 +80,30 @@ cutCheckErrorGL( const char* file, const int line)
 	if( CUTFalse == cutCheckErrorGL( __FILE__, __LINE__)) {                  \
 	exit(EXIT_FAILURE);                                                  \
 	}
+// Use this one to do : if(CUT_GL_HAS_ERROR)
+#define CUT_GL_HAS_ERROR (cutCheckErrorGL( __FILE__, __LINE__) ? CUTFalse : CUTTrue )
+#ifdef _WIN32
+#define CUT_CHECK_ERROR_GL2()\
+    if(CUT_GL_HAS_ERROR)\
+	{\
+		MessageBox(NULL, "Error in OpenGL. Check VStudio Output...", "Error", MB_OK);\
+		exit(EXIT_FAILURE);\
+	}
+#else // Not _WIN32:
+#define CUT_CHECK_ERROR_GL2()\
+    if(CUT_GL_HAS_ERROR)\
+	{\
+		printf("press a key...\n");\
+		getc(stdin);\
+		exit(EXIT_FAILURE);\
+	}
+#endif
+
 #else
 
-#define CUT_CHECK_ERROR_GL()                                               \
+#define CUT_CHECK_ERROR_GL()
+#define CUT_CHECK_ERROR_GL2()
+#define CUT_GL_HAS_ERROR CUTFalse
 
 #endif // _DEBUG
 

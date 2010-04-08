@@ -1,5 +1,5 @@
     /*
- * Copyright 1993-2009 NVIDIA Corporation.  All rights reserved.
+ * Copyright 1993-2010 NVIDIA Corporation.  All rights reserved.
  *
  * NVIDIA Corporation and its licensors retain all intellectual property and 
  * proprietary rights in and to this software and related documentation. 
@@ -69,6 +69,13 @@ inline __device__ __host__ float clamp(float f, float a, float b)
     return fmaxf(a, fminf(f, b));
 }
 
+// smoothstep
+inline __device__ __host__ float smoothstep(float a, float b, float x)
+{
+	float y = clamp((x - a) / (b - a), 0.0f, 1.0f);
+	return (y*y*(3.0f - (2.0f*y)));
+}
+
 // int2 functions
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -133,6 +140,18 @@ inline __host__ __device__ float2 make_float2(int2 a)
 inline __host__ __device__ float2 operator-(float2 &a)
 {
     return make_float2(-a.x, -a.y);
+}
+
+// min
+static __inline__ __host__ __device__ float2 fminf(float2 a, float2 b)
+{
+	return make_float2(fminf(a.x,b.x), fminf(a.y,b.y));
+}
+
+// max
+static __inline__ __host__ __device__ float2 fmaxf(float2 a, float2 b)
+{
+	return make_float2(fmaxf(a.x,b.x), fmaxf(a.y,b.y));
 }
 
 // addition

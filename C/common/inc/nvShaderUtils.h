@@ -1,5 +1,5 @@
 /*
- * Copyright 1993-2009 NVIDIA Corporation.  All rights reserved.
+ * Copyright 1993-2010 NVIDIA Corporation.  All rights reserved.
  *
  * NVIDIA Corporation and its licensors retain all intellectual property and 
  * proprietary rights in and to this software and related documentation. 
@@ -76,24 +76,25 @@ inline GLuint CompileGLSLShaderFromFile( GLenum target, const char* filename)
     char *text;
     long size;
 
-    //must read files as binary to prevent problems from newline translation
-    shaderFile = fopen( filename, "rb");
+    // read files as binary to prevent problems from newline translation
+    #ifdef _WIN32
+        if (fopen_s(&shaderFile, filename, "rb") != 0)
+    #else
+        if ((shaderFile = fopen(filename, "rb")) == 0)
+    #endif
+        {
+            return 0;
+        }
 
-    if ( shaderFile == NULL)
-        return 0;
-
+    // Get the length of the file
     fseek( shaderFile, 0, SEEK_END);
-
     size = ftell(shaderFile);
 
+    // Read the file contents from the start, then close file and add a null terminator
     fseek( shaderFile, 0, SEEK_SET);
-
     text = new char[size+1];
-
     fread( text, size, 1, shaderFile);
-
     fclose( shaderFile);
-
     text[size] = '\0';
 
     GLuint object = CompileGLSLShader( target, text);
@@ -173,7 +174,6 @@ inline GLuint LinkGLSLProgram( GLuint vertexShader, GLuint geometryShader, GLint
     return program;
 }
 
-
 //
 //
 ////////////////////////////////////////////////////////////
@@ -206,24 +206,25 @@ inline GLuint CompileASMShaderFromFile( GLenum target, const char* filename)
     char *text;
     long size;
 
-    //must read files as binary to prevent problems from newline translation
-    shaderFile = fopen( filename, "rb");
+    // read files as binary to prevent problems from newline translation
+    #ifdef _WIN32
+        if (fopen_s(&shaderFile, filename, "rb") != 0)
+    #else
+        if ((shaderFile = fopen(filename, "rb")) == 0)
+    #endif
+        {
+            return 0;
+        }
 
-    if ( shaderFile == NULL)
-        return 0;
-
+    // Get the length of the file
     fseek( shaderFile, 0, SEEK_END);
-
     size = ftell(shaderFile);
 
+    // Read the file contents from the start, then close file and add a null terminator
     fseek( shaderFile, 0, SEEK_SET);
-
     text = new char[size+1];
-
     fread( text, size, 1, shaderFile);
-
     fclose( shaderFile);
-
     text[size] = '\0';
 
     GLuint program_id = CompileASMShader( target, text);

@@ -1,5 +1,5 @@
 /*
- * Copyright 1993-2009 NVIDIA Corporation.  All rights reserved.
+ * Copyright 1993-2010 NVIDIA Corporation.  All rights reserved.
  *
  * NVIDIA Corporation and its licensors retain all intellectual property and 
  * proprietary rights in and to this software and related documentation. 
@@ -9,8 +9,18 @@
  * 
  */
  
- #ifndef _CUTIL_INLINE_FUNCTIONS_RUNTIME_H_
+#ifndef _CUTIL_INLINE_FUNCTIONS_RUNTIME_H_
 #define _CUTIL_INLINE_FUNCTIONS_RUNTIME_H_
+
+#ifdef _WIN32
+#ifdef _DEBUG // Do this only in debug mode...
+#  define WINDOWS_LEAN_AND_MEAN
+#  include <windows.h>
+#  include <stdlib.h>
+#  undef min
+#  undef max
+#endif
+#endif
 
 #include <stdio.h>
 #include <string.h>
@@ -48,41 +58,100 @@ inline void __cutilExit(int argc, char **argv)
     exit(EXIT_SUCCESS);
 }
 
+#define MIN(a,b) ((a < b) ? a : b)
+#define MAX(a,b) ((a > b) ? a : b)
+
 // This function returns the best GPU (with maximum GFLOPS)
 inline int cutGetMaxGflopsDeviceId()
 {
-	int device_count = 0;
+	int current_device   = 0, sm_per_multiproc = 0;
+	int max_compute_perf = 0, max_perf_device  = 0;
+	int device_count     = 0, best_SM_arch     = 0;
+    int arch_cores_sm[3] = { 1, 8, 32 };
+	cudaDeviceProp deviceProp;
+
 	cudaGetDeviceCount( &device_count );
+	// Find the best major SM Architecture GPU device
+	while ( current_device < device_count ) {
+		cudaGetDeviceProperties( &deviceProp, current_device );
+		if (deviceProp.major > 0 && deviceProp.major < 9999) {
+			best_SM_arch = MAX(best_SM_arch, deviceProp.major);
+		}
+		current_device++;
+	}
 
-	cudaDeviceProp device_properties;
-	int max_gflops_device = 0;
-	int max_gflops = 0;
-	
-	int current_device = 0;
-	cudaGetDeviceProperties( &device_properties, current_device );
-	max_gflops = device_properties.multiProcessorCount * device_properties.clockRate;
-	++current_device;
+    // Find the best CUDA capable GPU device
+	current_device = 0;
+	while( current_device < device_count ) {
+		cudaGetDeviceProperties( &deviceProp, current_device );
+		if (deviceProp.major == 9999 && deviceProp.minor == 9999) {
+		    sm_per_multiproc = 1;
+		} else if (deviceProp.major <= 2) {
+			sm_per_multiproc = arch_cores_sm[deviceProp.major];
+		} else {
+			sm_per_multiproc = arch_cores_sm[2];
+		}
 
-	while( current_device < device_count )
-	{
-		cudaGetDeviceProperties( &device_properties, current_device );
-		int gflops = device_properties.multiProcessorCount * device_properties.clockRate;
-		if( gflops > max_gflops )
-		{
-			max_gflops        = gflops;
-			max_gflops_device = current_device;
+		int compute_perf  = deviceProp.multiProcessorCount * sm_per_multiproc * deviceProp.clockRate;
+		if( compute_perf  > max_compute_perf ) {
+            // If we find GPU with SM major > 2, search only these
+			if ( best_SM_arch > 2 ) {
+				// If our device==dest_SM_arch, choose this, or else pass
+				if (deviceProp.major == best_SM_arch) {	
+					max_compute_perf  = compute_perf;
+					max_perf_device   = current_device;
+				}
+			} else {
+				max_compute_perf  = compute_perf;
+				max_perf_device   = current_device;
+			}
 		}
 		++current_device;
 	}
-
-	return max_gflops_device;
+	return max_perf_device;
 }
+
+// Give a little more for Windows : the console window often disapears before we can read the message
+#ifdef _WIN32
+# if 1//ndef UNICODE
+#  ifdef _DEBUG // Do this only in debug mode...
+	inline void VSPrintf(FILE *file, LPCSTR fmt, ...)
+	{
+		size_t fmt2_sz	= 2048;
+		char *fmt2		= (char*)malloc(fmt2_sz);
+		va_list  vlist;
+		va_start(vlist, fmt);
+		while((_vsnprintf(fmt2, fmt2_sz, fmt, vlist)) < 0) // means there wasn't anough room
+		{
+			fmt2_sz *= 2;
+			if(fmt2) free(fmt2);
+			fmt2 = (char*)malloc(fmt2_sz);
+		}
+		OutputDebugStringA(fmt2);
+		fprintf(file, fmt2);
+		free(fmt2);
+	}
+#	define FPRINTF(a) VSPrintf a
+#  else //debug
+#	define FPRINTF(a) fprintf a
+// For other than Win32
+#  endif //debug
+# else //unicode
+// Unicode case... let's give-up for now and keep basic printf
+#	define FPRINTF(a) fprintf a
+# endif //unicode
+#else //win32
+#	define FPRINTF(a) fprintf a
+#endif //win32
+
+// NOTE: "%s(%i) : " allows Visual Studio to directly jump to the file at the right line
+// when the user double clicks on the error line in the Output pane. Like any compile error.
 
 inline void __cudaSafeCallNoSync( cudaError err, const char *file, const int line )
 {
     if( cudaSuccess != err) {
-        fprintf(stderr, "cudaSafeCallNoSync() Runtime API error in file <%s>, line %i : %s.\n",
-                file, line, cudaGetErrorString( err) );
+        FPRINTF((stderr, "%s(%i) : cudaSafeCallNoSync() Runtime API error : %s.\n",
+                file, line, cudaGetErrorString( err) ));
         exit(-1);
     }
 }
@@ -90,8 +159,8 @@ inline void __cudaSafeCallNoSync( cudaError err, const char *file, const int lin
 inline void __cudaSafeCall( cudaError err, const char *file, const int line )
 {
     if( cudaSuccess != err) {
-        fprintf(stderr, "cudaSafeCall() Runtime API error in file <%s>, line %i : %s.\n",
-                file, line, cudaGetErrorString( err) );
+		FPRINTF((stderr, "%s(%i) : cudaSafeCall() Runtime API error : %s.\n",
+                file, line, cudaGetErrorString( err) ));
         exit(-1);
     }
 }
@@ -100,8 +169,8 @@ inline void __cudaSafeThreadSync( const char *file, const int line )
 {
     cudaError err = cudaThreadSynchronize();
     if ( cudaSuccess != err) {
-        fprintf(stderr, "cudaThreadSynchronize() Driver API error in file '%s' in line %i : %s.\n",
-                file, line, cudaGetErrorString( err) );
+        FPRINTF((stderr, "%s(%i) : cudaThreadSynchronize() Driver API error : %s.\n",
+                file, line, cudaGetErrorString( err) ));
         exit(-1);
     }
 }
@@ -109,8 +178,8 @@ inline void __cudaSafeThreadSync( const char *file, const int line )
 inline void __cufftSafeCall( cufftResult err, const char *file, const int line )
 {
     if( CUFFT_SUCCESS != err) {
-        fprintf(stderr, "cufftSafeCall() CUFFT error in file <%s>, line %i.\n",
-                file, line);
+        FPRINTF((stderr, "%s(%i) : cufftSafeCall() CUFFT error.\n",
+                file, line));
         exit(-1);
     }
 }
@@ -118,8 +187,8 @@ inline void __cufftSafeCall( cufftResult err, const char *file, const int line )
 inline void __cutilCheckError( CUTBoolean err, const char *file, const int line )
 {
     if( CUTTrue != err) {
-        fprintf(stderr, "CUTIL CUDA error in file <%s>, line %i.\n",
-                file, line);
+        FPRINTF((stderr, "%s(%i) : CUTIL CUDA error.\n",
+                file, line));
         exit(-1);
     }
 }
@@ -128,15 +197,15 @@ inline void __cutilCheckMsg( const char *errorMessage, const char *file, const i
 {
     cudaError_t err = cudaGetLastError();
     if( cudaSuccess != err) {
-        fprintf(stderr, "cutilCheckMsg() CUTIL CUDA error: %s in file <%s>, line %i : %s.\n",
-                errorMessage, file, line, cudaGetErrorString( err) );
+        FPRINTF((stderr, "%s(%i) : cutilCheckMsg() CUTIL CUDA error : %s : %s.\n",
+                file, line, errorMessage, cudaGetErrorString( err) ));
         exit(-1);
     }
 #ifdef _DEBUG
     err = cudaThreadSynchronize();
     if( cudaSuccess != err) {
-        fprintf(stderr, "cutilCheckMsg cudaThreadSynchronize error: %s in file <%s>, line %i : %s.\n",
-                errorMessage, file, line, cudaGetErrorString( err) );
+		FPRINTF((stderr, "%s(%i) : cutilCheckMsg cudaThreadSynchronize error: %s : %s.\n",
+                file, line, errorMessage, cudaGetErrorString( err) ));
         exit(-1);
     }
 #endif
@@ -144,8 +213,8 @@ inline void __cutilCheckMsg( const char *errorMessage, const char *file, const i
 inline void __cutilSafeMalloc( void *pointer, const char *file, const int line )
 {
     if( !(pointer)) {
-        fprintf(stderr, "cutilSafeMalloc host malloc failure in file <%s>, line %i\n",
-                file, line);
+        FPRINTF((stderr, "%s(%i) : cutilSafeMalloc host malloc failure\n",
+                file, line));
         exit(-1);
     }
 }
@@ -159,7 +228,7 @@ inline void __cutilSafeMalloc( void *pointer, const char *file, const int line )
         int deviceCount;
         cutilSafeCallNoSync(cudaGetDeviceCount(&deviceCount));
         if (deviceCount == 0) {
-            fprintf(stderr, "CUTIL CUDA error: no devices supporting CUDA.\n");
+            FPRINTF((stderr, "CUTIL CUDA error: no devices supporting CUDA.\n"));
             exit(-1);
         }
         int dev = 0;
@@ -169,11 +238,11 @@ inline void __cutilSafeMalloc( void *pointer, const char *file, const int line )
         cudaDeviceProp deviceProp;
         cutilSafeCallNoSync(cudaGetDeviceProperties(&deviceProp, dev));
         if (deviceProp.major < 1) {
-            fprintf(stderr, "cutil error: device does not support CUDA.\n");
+            FPRINTF((stderr, "cutil error: GPU device does not support CUDA.\n"));
             exit(-1);                                                  \
         }
         if (cutCheckCmdLineFlag(ARGC, (const char **) ARGV, "quiet") == CUTFalse)
-            fprintf(stderr, "Using device %d: %s\n", dev, deviceProp.name);
+            FPRINTF((stderr, "Using CUDA device [%d]: %s\n", dev, deviceProp.name));
         cutilSafeCall(cudaSetDevice(dev));
     }
 
@@ -196,14 +265,14 @@ inline void cutilCudaCheckCtxLost(const char *errorMessage, const char *file, co
 {
     cudaError_t err = cudaGetLastError();
     if( cudaSuccess != err) {
-        fprintf(stderr, "CUDA error: %s in file '%s' in line %i : %s.\n",
-        errorMessage, file, line, cudaGetErrorString( err) );
+        FPRINTF((stderr, "%s(%i) : CUDA error: %s : %s.\n",
+        file, line, errorMessage, cudaGetErrorString( err) ));
         exit(-1);
     }
     err = cudaThreadSynchronize();
     if( cudaSuccess != err) {
-        fprintf(stderr, "CCUDA error: %s in file '%s' in line %i : %s.\n",
-        errorMessage, file, line, cudaGetErrorString( err) );
+        FPRINTF((stderr, "%s(%i) : CCUDA error: %s : %s.\n",
+        file, line, errorMessage, cudaGetErrorString( err) ));
         exit(-1);
     }
 }
@@ -223,7 +292,8 @@ inline bool cutilCudaCapabilities(int major_version, int minor_version)
     cutilSafeCall( cudaGetDevice(&dev) );
     cutilSafeCall( cudaGetDeviceProperties(&deviceProp, dev));
 
-    if(deviceProp.major >= major_version && deviceProp.minor >= minor_version)
+    if((deviceProp.major > major_version) ||
+	   (deviceProp.major == major_version && deviceProp.minor >= minor_version))
     {
         printf("> Compute SM %d.%d Device Detected\n", deviceProp.major, deviceProp.minor);
         printf("> Device %d: <%s>\n", dev, deviceProp.name);
@@ -232,7 +302,7 @@ inline bool cutilCudaCapabilities(int major_version, int minor_version)
     else
     {
         printf("There is no device supporting CUDA compute capability %d.%d.\n", major_version, minor_version);
-        printf("TEST PASSED\n");
+        printf("PASSED\n");
         return false;
     }
 }
